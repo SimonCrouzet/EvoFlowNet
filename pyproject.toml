@@ -47,6 +47,22 @@ wandb = ["wandb>=0.17"]
 # landscapes are closed-form or table-lookup and need none of this.
 plm = ["transformers>=4.44"]
 
+# Torch build selection. These extras add no dependency -- torch is already
+# required -- they redirect it to a specific wheel index.
+#
+# GPU is the primary target: Ehrlich landscapes at the sequence lengths used in
+# the literature (L=256) mean hundreds of forward passes per trajectory, which
+# is where a GPU stops being optional. The default install is therefore the
+# CUDA build, and CPU is the fallback for machines without a GPU and for CI,
+# where ~40 nvidia-* packages and a 4.7GB environment would be pure waste
+# (the CPU build is 1.1GB).
+#
+#   uv sync                 CUDA build on Linux -- the default, GPU-first
+#   uv sync --extra cuda    same, pinned to an explicit CUDA wheel index
+#   uv sync --extra cpu     CPU fallback: no GPU, or CI
+cuda = ["torch>=2.4"]
+cpu = ["torch>=2.4"]
+
 [project.urls]
 Homepage = "https://github.com/SimonCrouzet/evoflownet"
 Documentation = "https://simoncrouzet.github.io/evoflownet"
@@ -115,6 +131,28 @@ exclude_also = [
 # back to copying. Asking for copies outright keeps the output clean and the
 # behaviour identical everywhere.
 link-mode = "copy"
+
+# A CPU build and a CUDA build of torch cannot coexist. Declaring the conflict
+# lets uv lock both resolutions in one lockfile and reject a request for both.
+conflicts = [[{ extra = "cpu" }, { extra = "cuda" }]]
+
+# Marked `explicit` so these indexes are consulted only for packages routed to
+# them below. Without that, every dependency would be looked up here first.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cuda"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", extra = "cpu" },
+    { index = "pytorch-cuda", extra = "cuda" },
+]
 
 [tool.ruff]
 line-length = 100
