@@ -178,3 +178,34 @@ convention = "google"
     "E402",    # imports after prose cells are normal in notebooks
     "T20",     # notebooks print
 ]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src", "tests"]
+strict = true
+# Beyond --strict: catch code made dead by narrowing, and casts that no longer
+# do anything. Both tend to appear when a signature changes underneath callers.
+warn_unreachable = true
+warn_redundant_casts = true
+enable_error_code = [
+    "redundant-expr",
+    "truthy-bool",
+    "ignore-without-code",  # bare `# type: ignore` hides the next real error
+    "possibly-undefined",
+]
+pretty = true
+
+[[tool.mypy.overrides]]
+# Tests favour readability over exhaustive annotation. They are still checked --
+# a test that calls a function wrongly still fails -- they simply are not
+# required to annotate every fixture and helper.
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
+[[tool.mypy.overrides]]
+# Third-party packages that ship no type information. Listed explicitly rather
+# than globally ignoring missing imports, so a genuinely mistyped import of a
+# typed package still fails.
+module = ["hydra.*", "omegaconf.*", "wandb.*"]
+ignore_missing_imports = true
