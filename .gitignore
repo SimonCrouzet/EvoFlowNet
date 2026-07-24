@@ -1,9 +1,5 @@
-# AI-generated notes, reference papers, scratch work — never committed
+# Local working directories — never committed
 notes/
-
-# Manuscript drafts. Kept out of the repository so the public history stays a
-# software history, and so draft scientific claims are not published by
-# accident before they have been run.
 manuscript/
 
 # Byte-compiled / optimized
