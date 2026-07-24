@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-authors = [{ name = "Simon Crouzet" }]
+authors = [{ name = "EvoFlowNet Contributors" }]
 keywords = [
     "gflownet",
     "directed-evolution",
@@ -64,10 +64,10 @@ cuda = ["torch>=2.4"]
 cpu = ["torch>=2.4"]
 
 [project.urls]
-Homepage = "https://github.com/SimonCrouzet/evoflownet"
+Homepage = "https://github.com/SimonCrouzet/EvoFlowNet"
 Documentation = "https://simoncrouzet.github.io/evoflownet"
-Repository = "https://github.com/SimonCrouzet/evoflownet"
-Issues = "https://github.com/SimonCrouzet/evoflownet/issues"
+Repository = "https://github.com/SimonCrouzet/EvoFlowNet"
+Issues = "https://github.com/SimonCrouzet/EvoFlowNet/issues"
 
 [project.scripts]
 evoflownet = "evoflownet.cli.main:main"
