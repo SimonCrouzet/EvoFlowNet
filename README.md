@@ -1,60 +1,67 @@
 # EvoFlowNet
 
-**EvoFlowNet** applies Generative Flow Networks (GFlowNets) to in-silico directed evolution. It treats
-variant design as a *sampling* problem rather than an optimisation one: instead of climbing to the
-single best sequence, it learns a policy that samples variants in proportion to their fitness, so a
-design round returns a diverse, feasible batch rather than many copies of one local optimum.
+**EvoFlowNet** is a Python library for in-silico directed evolution with Generative Flow Networks
+(GFlowNets). It generates batches of sequence variants that are diverse and high-fitness at the same
+time, rather than many near-copies of a single best hit.
 
-The library is built around replaceable components — fitness landscapes, sequence environments,
-samplers, acquisition functions, metrics — so that a new landscape or a new baseline is an
-implementation of one interface and a configuration change, not a fork.
+Use it to run directed-evolution campaigns against a fitness landscape — your own, or one of the
+built-in benchmarks — and to compare a GFlowNet against classical baselines (genetic algorithm, hill
+climbing, simulated annealing, CMA-ES, MLDE) on equal terms.
 
 > [!NOTE]
-> Early development. The public API is not yet stable, and the milestones below are still landing.
+> Early development. The API is not yet stable and the milestones below are still landing.
 
 ---
 
-## Why sampling rather than optimisation
+## Why you might want this
 
-A design round that returns 96 near-identical sequences is a bad design round. Any single candidate can
-fail for reasons the model never saw — expression, aggregation, off-target effects — and screening
-budget spent on duplicates buys no information.
+A design round has a fixed budget — you can synthesise and assay so many variants and no more. If your
+proposal method returns 96 sequences that are minor variations on one design, you have spent the
+budget on a single bet. Anything that kills that design kills the whole round.
 
-Hill-climbing, genetic algorithms and greedy ML-assisted directed evolution all collapse onto one mode
-by construction. GFlowNets ([Bengio et al., NeurIPS 2021](https://arxiv.org/abs/2106.04399)) instead
-learn a policy whose sampling probability is proportional to reward, which yields batches that are
-high-fitness *and* diverse. Applied to mutational trajectories from a parent sequence, this is a direct
-model of directed evolution.
+Optimisers do this by construction: they climb toward one peak. A GFlowNet learns a policy that samples
+variants *in proportion to* their predicted fitness, so a batch spreads across the high-fitness regions
+of the landscape instead of piling onto one. Applied to mutation trajectories from a parent sequence,
+that is a direct model of what directed evolution actually does.
 
 ---
 
-## Benchmarks with real ground truth
+## Installation
 
-Most sequence-design benchmarks can only report "best score found", because the true optimum and the
-true fitness distribution are unknown. EvoFlowNet is deliberately built on two landscapes where they
-are not.
+Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 
-| Landscape | Kind | Why it was chosen |
+```bash
+git clone https://github.com/SimonCrouzet/EvoFlowNet
+cd EvoFlowNet
+uv sync                  # GPU (CUDA build of torch)
+uv sync --extra cpu      # CPU only — 1.1GB instead of 4.7GB
+```
+
+Everything in the default path runs on CPU. A GPU helps for long sequences and for the optional
+protein-language-model oracles (`--extra plm`).
+
+---
+
+## Built-in landscapes
+
+You can plug in any fitness function by implementing one interface. Two are included, chosen because
+their correct answers are known — which means you can check whether a method actually worked, not just
+whether it produced a plausible-looking number.
+
+| Landscape | What it is | Why it is useful |
 |---|---|---|
-| **Ehrlich functions** ([Stanton et al., ICML 2024 workshop](https://arxiv.org/abs/2407.00236)) | Closed-form, procedurally generated | Tunable epistasis, ruggedness and feasibility constraints, with a **provably attainable optimum** — so regret is exact, not relative |
-| **GB1** ([Wu et al., eLife 2016](https://elifesciences.org/articles/16965)) | Empirical, 4-site combinatorial | 149,361 of 160,000 variants measured. **Combinatorially complete and fully enumerable**, so mode coverage and the exact target distribution are computable |
+| **Ehrlich** | Closed-form, procedurally generated sequences with tunable epistasis, ruggedness and feasibility constraints | The optimum is guaranteed reachable, so you can measure true regret. No download; evaluation is instant |
+| **GB1** | Real deep-mutational-scanning data: 149,361 measured variants across 4 positions | Combinatorially complete, so every sequence has a ground-truth fitness and the whole space can be enumerated |
 
-This makes three normally-unavailable measurements possible:
-
-- **True simple regret** against the global optimum, rather than "best seen so far".
-- **Mode coverage** — how many distinct peaks were found, not the height of one.
-- **Distributional fidelity** — enumerate `p*(x) ∝ R(x)^β` exactly and measure L1 distance to the
-  sampler's empirical distribution. This is the only real test that a GFlowNet is sampling rather
-  than behaving as an expensive hill-climber.
-
-Ehrlich functions also define feasibility through a Markov transition matrix, which maps directly onto
-GFlowNet action masking. A masked policy is feasible *by construction*, where a genetic algorithm
-spends much of its evaluation budget on infeasible sequences — a comparison the original authors
-flagged as future work.
+Ehrlich landscapes also define which sequences are *constructible* at all. EvoFlowNet enforces this by
+masking invalid actions during generation, so every proposed sequence is feasible by construction
+rather than filtered out afterwards.
 
 ---
 
 ## Status
+
+The library is being built in milestones. Each one leaves `main` green and usable.
 
 | Milestone | Contents | State |
 |---|---|---|
@@ -66,21 +73,26 @@ flagged as future work.
 | M5 | Design–build–test–learn campaign loop under a budget | |
 | M6 | Workshop notebooks and documentation | |
 
+Usage examples and the CLI arrive with M2; this section will carry a worked example once there is
+something to run.
+
 ---
 
-## Installation
+## Design
 
-Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+Every major piece is an interface with swappable implementations, so adding a landscape, a sampler or
+an acquisition function means implementing one class and pointing a config at it.
 
-```bash
-git clone https://github.com/SimonCrouzet/EvoFlowNet
-cd EvoFlowNet
-uv sync                  # GPU-first: CUDA build of torch
-uv sync --extra cpu      # CPU fallback: 1.1GB instead of 4.7GB
-```
+| Component | Replace it to... |
+|---|---|
+| `FitnessLandscape` | score sequences with your own assay data, model, or simulator |
+| `SequenceEnvironment` | change how variants are built (append tokens, or mutate a parent) |
+| `Sampler` | swap the search method — GFlowNets and baselines share one interface |
+| `Acquisition` | change how a batch is chosen under uncertainty |
+| `Tracker` | send metrics somewhere other than the console |
 
-Both benchmark landscapes run on CPU. A GPU matters for Ehrlich instances at the sequence lengths used
-in the literature, and for the optional protein-language-model oracles (`--extra plm`).
+Landscapes compose: measurement noise, an evaluation budget and caching are wrappers you apply to any
+of them, so a budget cannot be accidentally bypassed.
 
 ---
 
@@ -102,8 +114,8 @@ and in what happens when you stop treating the first as an optimisation problem 
 as the sampling problem the second was built for.
 
 If you find this useful, have ideas, or are working on something in the same space and want to
-exchange — feel free to reach out. I'm also available for project-based work in computational
-molecular design and ML workflow development.
+exchange — feel free to reach out. I'm also available for project-based work in computational molecular
+design and ML workflow development.
 
 - **GitHub:** [@simoncrouzet](https://github.com/simoncrouzet)
 
@@ -113,9 +125,7 @@ molecular design and ML workflow development.
 
 Contributions, bug reports, and feature requests are welcome. Please open an issue to discuss
 significant changes before submitting a pull request. All pull requests should include tests and pass
-the existing suite. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup and the conventions this project
-follows — in particular, that implementations keep the notation of the paper they come from, and that
-tests check against known answers where one exists.
+the existing suite. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup and conventions.
 
 ---
 
@@ -131,7 +141,6 @@ If you use EvoFlowNet in your work, please acknowledge it and feel free to get i
 ## References
 
 - Bengio, E., Jain, M., Korablyov, M., Precup, D. & Bengio, Y. (2021). Flow Network based Generative Models for Non-Iterative Diverse Candidate Generation. *NeurIPS* 34, 27381–27394.
-- Bengio, Y. et al. (2023). GFlowNet Foundations. *JMLR* 24, 1–55.
 - Malkin, N., Jain, M., Bengio, E., Sun, C. & Bengio, Y. (2022). Trajectory Balance: Improved Credit Assignment in GFlowNets. *NeurIPS* 35.
 - Jain, M. et al. (2022). Biological Sequence Design with GFlowNets. *ICML*.
 - Jain, M. et al. (2023). Multi-Objective GFlowNets. *ICML*.
