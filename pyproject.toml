@@ -211,7 +211,14 @@ convention = "google"
 ]
 
 [tool.mypy]
-python_version = "3.11"
+# 3.12 rather than the 3.11 floor in requires-python. numpy's bundled type stubs
+# use PEP 695 `type` statements, which mypy refuses to parse when targeting 3.11,
+# and it gives up before checking anything of ours.
+#
+# Runtime support for 3.11 is guaranteed by the CI matrix instead, which is the
+# stronger check anyway: 3.12-only syntax is a SyntaxError on 3.11, so the 3.11
+# job fails at import rather than subtly.
+python_version = "3.12"
 files = ["src", "tests"]
 strict = true
 # Beyond --strict: catch code made dead by narrowing, and casts that no longer
