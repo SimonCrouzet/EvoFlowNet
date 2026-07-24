@@ -240,6 +240,9 @@ pretty = true
 module = "tests.*"
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
+# Follows from the above: if test helpers need not be annotated, calling them
+# cannot be an error either.
+disallow_untyped_calls = false
 
 [[tool.mypy.overrides]]
 # Third-party packages that ship no type information. Listed explicitly rather
