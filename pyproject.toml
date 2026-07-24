@@ -75,6 +75,14 @@ docs = [
     "mkdocstrings[python]>=0.26",
 ]
 
+[tool.uv]
+# The uv cache lives on the home filesystem, but a checkout may sit on a
+# different one (a mounted drive under WSL, a network share, a container bind
+# mount). Hardlinks cannot cross filesystems, so uv warns and silently falls
+# back to copying. Asking for copies outright keeps the output clean and the
+# behaviour identical everywhere.
+link-mode = "copy"
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
