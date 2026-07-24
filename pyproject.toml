@@ -74,3 +74,66 @@ docs = [
     "mkdocs-material>=9.5",
     "mkdocstrings[python]>=0.26",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "F",    # pyflakes
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "I",    # isort
+    "N",    # pep8-naming
+    "D",    # pydocstyle
+    "UP",   # pyupgrade
+    "ANN",  # flake8-annotations
+    "S",    # flake8-bandit
+    "B",    # flake8-bugbear
+    "A",    # flake8-builtins
+    "C4",   # flake8-comprehensions
+    "PT",   # flake8-pytest-style
+    "RET",  # flake8-return
+    "SIM",  # flake8-simplify
+    "ARG",  # flake8-unused-arguments
+    "PTH",  # flake8-use-pathlib
+    "TC",   # flake8-type-checking
+    "ERA",  # eradicate (commented-out code)
+    "PL",   # pylint
+    "NPY",  # numpy-specific rules
+    "RUF",  # ruff-specific rules
+]
+ignore = [
+    # Mathematical notation. This library implements objectives from published
+    # papers, and readers check the code against the papers. Renaming `Z` to
+    # `partition_function` or `L` to `sequence_length` inside a loss function
+    # makes it *harder* to verify against the source, so single-capital names
+    # are allowed where they mirror the reference notation.
+    "N803",  # argument name should be lowercase
+    "N806",  # variable in function should be lowercase
+    # Conflicts with the formatter.
+    "COM812",
+    "ISC001",
+    # Chosen docstring convention resolves these mutually exclusive pairs.
+    "D203",  # one-blank-line-before-class (conflicts with D211)
+    "D213",  # multi-line-summary-second-line (conflicts with D212)
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "D",       # tests document themselves through their names
+    "ANN",     # annotating every fixture adds noise, not safety
+    "S101",    # assert is the entire point of a test
+    "PLR2004", # magic values are how you write expected results
+]
+"notebooks/**" = [
+    "D",
+    "ANN",
+    "E402",    # imports after prose cells are normal in notebooks
+    "T20",     # notebooks print
+]
