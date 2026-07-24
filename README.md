@@ -97,9 +97,8 @@ provided that you preserve the copyright notice and license text in any distribu
 ## About
 
 I'm Simon Crouzet, an independent researcher and consultant in AI/ML for molecular design and drug
-discovery. EvoFlowNet grew out of a research proposal on generative models for antibody optimisation,
-generalised into the broader problem it was really an instance of: directed evolution as search over a
-fitness landscape.
+discovery. EvoFlowNet came out of wanting an open, rigorous testbed for generative sequence design —
+one where diversity and feasibility are measured against ground truth rather than asserted.
 
 If you find this useful, have ideas, or are working on something in the same space and want to
 exchange — feel free to reach out. I'm also available for project-based work in computational
