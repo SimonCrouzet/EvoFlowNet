@@ -1,0 +1,53 @@
+# Local gate mirroring CI. Anything enforced here is also enforced in the
+# workflow, so a green commit does not turn into a red pull request.
+#
+# Install once with:  uv run pre-commit install --hook-type pre-commit --hook-type commit-msg
+
+default_install_hook_types: [pre-commit, commit-msg]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-case-conflict # two paths differing only in case break on macOS and Windows
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-added-large-files
+        # Downloaded landscapes belong in the gitignored data/ cache, never in
+        # git history, where they cannot be removed without a rewrite.
+        args: [--maxkb=512]
+      - id: debug-statements
+      - id: check-executables-have-shebangs
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.5
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  # Commit messages follow Conventional Commits, which is what lets the
+  # changelog be generated from history rather than maintained by hand.
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.2.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+
+  # mypy runs as a local hook rather than through mirrors-mypy: type checking
+  # this project needs its actual dependencies (torch, numpy) importable, and
+  # an isolated hook environment would silently check against missing stubs.
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy (strict, project environment)
+        entry: uv run mypy
+        language: system
+        types: [python]
+        pass_filenames: false
+        require_serial: true
