@@ -13,9 +13,12 @@ dist/
 *.egg-info/
 .eggs/
 
-# Environments
-.venv/
-venv/
+# Environments.
+# No trailing slash: a large environment is often kept on another filesystem
+# and symlinked in, and a pattern ending in "/" matches directories only, so
+# the symlink itself would show up as untracked.
+.venv
+venv
 .python-version
 
 # Testing / coverage
