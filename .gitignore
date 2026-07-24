@@ -1,0 +1,64 @@
+# AI-generated notes, reference papers, scratch work — never committed
+notes/
+
+# Byte-compiled / optimized
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Environments
+.venv/
+venv/
+.python-version
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.hypothesis/
+
+# Type checking / linting caches
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+
+# Jupyter — notebooks are stored as jupytext-paired .py scripts; the .ipynb
+# files are generated artifacts and must not be committed.
+*.ipynb
+.ipynb_checkpoints/
+
+# Experiment outputs
+# outputs/ and multirun/ are Hydra's run and sweep directories.
+outputs/
+multirun/
+wandb/
+mlruns/
+lightning_logs/
+*.ckpt
+*.pt
+
+# Dataset cache (downloaded landscapes, e.g. GB1).
+# Exclude the contents rather than the directory itself, so the negation below
+# can re-include the placeholder — a negation cannot rescue a file whose parent
+# directory is itself excluded.
+data/*
+!data/.gitkeep
+
+# Documentation build
+site/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+!.vscode/extensions.json
