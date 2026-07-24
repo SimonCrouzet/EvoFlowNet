@@ -19,21 +19,12 @@ If you have no GPU, or you want the small environment:
 uv sync --extra cpu         # 1.1GB instead of 4.7GB
 ```
 
-<details>
-<summary>If your checkout is on a small or slow filesystem</summary>
-
-A CUDA environment is around 4.7GB and tens of thousands of small files, which
-is painful on a nearly full disk or a mounted Windows drive under WSL. Put it
-elsewhere and symlink it in — `uv` follows the link and `.venv` is ignored
-either way:
+A CUDA environment is around 4.7GB. To keep it off the disk holding the
+checkout, point uv elsewhere:
 
 ```bash
-uv sync                                   # create it first
-mv .venv /path/on/a/faster/disk/evoflownet
-ln -s /path/on/a/faster/disk/evoflownet .venv
+export UV_PROJECT_ENVIRONMENT=/somewhere/with/room/evoflownet
 ```
-
-</details>
 
 ## The loop
 
