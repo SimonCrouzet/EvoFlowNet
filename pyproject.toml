@@ -1,0 +1,76 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "evoflownet"
+version = "0.1.0.dev0"
+description = "GFlowNets for in-silico directed evolution: sampling diverse, feasible, high-fitness protein variants."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Simon Crouzet" }]
+keywords = [
+    "gflownet",
+    "directed-evolution",
+    "protein-engineering",
+    "fitness-landscape",
+    "generative-models",
+    "active-learning",
+    "multi-objective-optimization",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Typing :: Typed",
+]
+
+dependencies = [
+    "numpy>=1.26",
+    "torch>=2.4",
+    "hydra-core>=1.3",
+]
+
+[project.optional-dependencies]
+# Experiment tracking. Kept optional so the library, its tests and CI never
+# require an account or API key: the default tracker writes to the console.
+wandb = ["wandb>=0.17"]
+
+# Protein language model oracles (ESM-2). Heavy and GPU-oriented; the default
+# landscapes are closed-form or table-lookup and need none of this.
+plm = ["transformers>=4.44"]
+
+[project.urls]
+Homepage = "https://github.com/SimonCrouzet/evoflownet"
+Documentation = "https://simoncrouzet.github.io/evoflownet"
+Repository = "https://github.com/SimonCrouzet/evoflownet"
+Issues = "https://github.com/SimonCrouzet/evoflownet/issues"
+
+[project.scripts]
+evoflownet = "evoflownet.cli.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/evoflownet"]
+
+# Development dependencies, managed by uv. These are not part of any published
+# extra: nobody installing the library from PyPI should pull in a test runner.
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=5.0",
+    "hypothesis>=6.112",
+    "ruff>=0.7",
+    "mypy>=1.13",
+    "pre-commit>=4.0",
+]
+docs = [
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.26",
+]
