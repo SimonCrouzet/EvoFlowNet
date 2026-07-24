@@ -75,6 +75,39 @@ docs = [
     "mkdocstrings[python]>=0.26",
 ]
 
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = [
+    "-ra",              # report why every non-passing test did not pass
+    "--strict-markers", # a typo'd marker is an error, not a silent no-op
+    "--strict-config",
+    "--import-mode=importlib",
+]
+# Coverage is deliberately not in addopts: it slows every local run and
+# interferes with debuggers. CI passes --cov explicitly.
+markers = [
+    "slow: takes more than a few seconds; deselect with '-m \"not slow\"'",
+    "requires_data: needs a downloaded dataset, so it cannot run offline",
+]
+# Warnings are failures. A DeprecationWarning from numpy or torch is how a
+# silent behaviour change arrives; discovering it at upgrade time is cheaper
+# than discovering it in a result.
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+source = ["src/evoflownet"]
+branch = true
+
+[tool.coverage.report]
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@(abc\\.)?abstractmethod",
+    "class .*\\(Protocol\\):",
+    "\\.\\.\\.",
+]
+
 [tool.uv]
 # The uv cache lives on the home filesystem, but a checkout may sit on a
 # different one (a mounted drive under WSL, a network share, a container bind
