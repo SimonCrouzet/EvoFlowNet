@@ -1,0 +1,9 @@
+blank_issues_enabled: true
+
+contact_links:
+  - name: Question or discussion
+    url: https://github.com/SimonCrouzet/evoflownet/discussions
+    about: For usage questions, method discussion, or "is this the right approach" -- not a bug.
+  - name: Security vulnerability
+    url: https://github.com/SimonCrouzet/evoflownet/security/advisories/new
+    about: Report privately. Please do not open a public issue for a vulnerability.

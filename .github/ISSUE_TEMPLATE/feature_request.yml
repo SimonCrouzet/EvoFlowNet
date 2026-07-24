@@ -1,0 +1,49 @@
+name: Feature or method proposal
+description: Propose new functionality, a new landscape, a baseline, or a method from the literature.
+labels: [enhancement]
+
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve
+      description: >
+        Describe the limitation you hit, not the implementation you have in
+        mind. A proposal framed as a problem often has a simpler solution than
+        the one that prompted it.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of addition is this
+      options:
+        - New fitness landscape or dataset
+        - New sampler or GFlowNet objective
+        - New baseline method
+        - New metric
+        - Acquisition function or active-learning change
+        - Infrastructure, docs or workshop material
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: reference
+    attributes:
+      label: Reference
+      description: >
+        If this comes from a paper, link it. Implementations here follow their
+        source's notation so readers can check the code against the paper, so
+        knowing the reference up front shapes the implementation.
+      placeholder: "e.g. Malkin et al., Trajectory Balance, NeurIPS 2022"
+
+  - type: textarea
+    id: verification
+    attributes:
+      label: How would it be verified
+      description: >
+        What would show this works? Where possible, prefer a check with a known
+        answer -- a landscape with a known optimum, or a distribution that can
+        be enumerated exactly -- over a plot that merely looks reasonable.

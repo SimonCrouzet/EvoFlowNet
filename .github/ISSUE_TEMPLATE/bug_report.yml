@@ -1,0 +1,56 @@
+name: Bug report
+description: Something behaves incorrectly, crashes, or produces a wrong result.
+labels: [bug]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For a *wrong number* rather than a crash, the reproduction matters more
+        than the traceback. Please include the seed and the exact configuration.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you observed, and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: >
+        The smallest command or script that shows the problem. Include the seed
+        and the landscape or environment configuration -- without them a
+        sampling bug usually cannot be reproduced at all.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: "Output of: `uv run python -c \"import evoflownet, torch, sys; print(evoflownet.__version__, torch.__version__, sys.version)\"`"
+      render: shell
+    validations:
+      required: true
+
+  - type: dropdown
+    id: device
+    attributes:
+      label: Device
+      options:
+        - CPU
+        - CUDA GPU
+        - Other / unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Traceback or logs
+      render: shell
