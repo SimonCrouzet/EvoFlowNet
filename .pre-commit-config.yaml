@@ -31,6 +31,14 @@ repos:
         args: [--fix]
       - id: ruff-format
 
+  # Workflow files are only executed by GitHub, so a mistake in one is normally
+  # discovered by pushing and watching it fail. actionlint catches undefined
+  # expressions, bad runner labels and shell errors before that round trip.
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.12
+    hooks:
+      - id: actionlint
+
   # Commit messages follow Conventional Commits, which is what lets the
   # changelog be generated from history rather than maintained by hand.
   - repo: https://github.com/compilerla/conventional-pre-commit
