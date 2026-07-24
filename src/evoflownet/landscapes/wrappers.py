@@ -7,17 +7,25 @@ landscape needing to know about them, and they compose:
     >>> from evoflownet.landscapes import EhrlichLandscape
     >>> assay = Budgeted(Noisy(EhrlichLandscape(seed=0), scale=0.05, seed=1), max_evaluations=500)
 
-**Order matters, and expresses a real choice.** Wrapping is applied inside-out,
-so the example above adds noise first and then counts. Two orderings in
-particular say different things:
+**Order matters.** A call enters the outermost wrapper first, so whichever of
+:class:`Budgeted` and :class:`Cached` is on the outside decides what the budget
+actually counts:
 
-* ``Budgeted(Cached(landscape))`` -- a repeat measurement is free. This models
-  looking up a result you already have.
-* ``Cached(Budgeted(landscape))`` -- a repeat measurement costs budget. This
-  models actually running the assay again.
+* ``Cached(Budgeted(landscape))`` -- the cache answers first, so the budget only
+  ever sees sequences it has not scored before. **The budget counts distinct
+  sequences.** Re-requesting a known sequence is free.
+* ``Budgeted(Cached(landscape))`` -- the budget is charged before the cache is
+  consulted. **The budget counts requests.** The cache still avoids recomputing,
+  but a repeat costs budget just the same.
 
-The first is almost always what a benchmark wants; the second is what a wet lab
-does. Neither is a default, so callers choose explicitly.
+Which is right depends on what the budget represents. If it stands for a
+screening capacity -- how many distinct variants can be made and assayed -- put
+the cache outside. If it stands for the number of oracle calls a method is
+permitted, which is the fairer basis for comparing methods that revisit
+sequences at different rates, put the budget outside.
+
+Neither is a default, because choosing silently would change what a reported
+budget means.
 """
 
 from __future__ import annotations

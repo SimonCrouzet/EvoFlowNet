@@ -167,23 +167,25 @@ class TestCached:
 
 
 class TestComposition:
-    def test_cache_inside_budget_makes_repeats_free(self, landscape, sequences):
-        # Models looking up a result you already have.
-        assay = Budgeted(Cached(landscape), max_evaluations=len(sequences))
+    def test_budget_outside_cache_counts_every_request(self, landscape, sequences):
+        # Budget is charged before the cache is consulted, so a repeat costs the
+        # same as a first look. The cache still avoids recomputing.
+        inner = Cached(landscape)
+        assay = Budgeted(inner, max_evaluations=len(sequences))
         assay.evaluate(sequences)
         assert assay.remaining == 0
-        # The budget is spent, so a repeat cannot be served however cheap it is.
         with pytest.raises(BudgetExhaustedError):
             assay.evaluate(sequences)
 
-    def test_budget_inside_cache_makes_repeats_cost_nothing_twice(self, landscape, sequences):
-        # Models a lab where re-running the assay costs money, but the campaign
-        # remembers what it already measured.
+    def test_cache_outside_budget_counts_distinct_sequences(self, landscape, sequences):
+        # The cache answers first, so the budget only ever sees sequences it has
+        # not scored before.
         budget = Budgeted(landscape, max_evaluations=len(sequences))
         assay = Cached(budget)
         assay.evaluate(sequences)
         assay.evaluate(sequences)
         assert budget.used == len(sequences)
+        assert assay.hits == len(sequences)
 
     def test_noise_and_budget_compose(self, landscape, sequences):
         assay = Budgeted(Noisy(landscape, scale=0.05, seed=0), max_evaluations=50)
