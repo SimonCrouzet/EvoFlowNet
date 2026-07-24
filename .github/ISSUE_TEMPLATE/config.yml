@@ -4,6 +4,6 @@ contact_links:
   - name: Question or discussion
     url: https://github.com/SimonCrouzet/EvoFlowNet/discussions
     about: For usage questions, method discussion, or "is this the right approach" -- not a bug.
-  - name: Security vulnerability
+  - name: Report something privately
     url: https://github.com/SimonCrouzet/EvoFlowNet/security/advisories/new
-    about: Report privately. Please do not open a public issue for a vulnerability.
+    about: For anything that should not be discussed in a public issue.

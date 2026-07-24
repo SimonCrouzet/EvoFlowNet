@@ -98,9 +98,8 @@ wrong distribution passes a naive test suite. Please do not write that suite.
 ## Reporting things
 
 Bugs and proposals go to
-[Issues](https://github.com/SimonCrouzet/EvoFlowNet/issues); the templates ask
-for a seed and configuration because sampling bugs usually cannot be reproduced
-without them. Vulnerabilities go through [SECURITY.md](SECURITY.md), privately.
+[Issues](https://github.com/SimonCrouzet/EvoFlowNet/issues). The templates ask
+for a seed and a configuration because sampling bugs usually cannot be
+reproduced without them.
 
-By contributing you agree your work is licensed under Apache-2.0, and to the
-[Code of Conduct](CODE_OF_CONDUCT.md).
+Contributions are licensed under Apache-2.0, the same as the project.
