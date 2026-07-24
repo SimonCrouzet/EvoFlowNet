@@ -1,0 +1,38 @@
+version: 2
+
+updates:
+  # Actions are pinned to commit SHAs, which is what makes the supply chain
+  # auditable -- and also what makes them invisible to a human reading the
+  # workflow. Dependabot is therefore not optional here: without it, pinned
+  # actions silently rot and never receive security fixes.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"
+    groups:
+      # One pull request for all action bumps. Reviewing six near-identical
+      # SHA changes separately costs attention without adding information.
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "build"
+    open-pull-requests-limit: 5
+    groups:
+      # Development tooling moves fast and cannot affect published behaviour,
+      # so it is grouped and reviewed as one change.
+      dev-tooling:
+        patterns: ["ruff", "mypy", "pytest*", "hypothesis", "pre-commit", "mkdocs*", "mkdocstrings*"]
+      # Everything else -- torch, numpy, hydra -- can change numerical results,
+      # so those arrive individually and get read properly.
+    ignore:
+      # Torch major versions change kernels, defaults and sometimes numerics.
+      # Those upgrades are deliberate work, not a dependency bump to merge.
+      - dependency-name: torch
+        update-types: ["version-update:semver-major"]
