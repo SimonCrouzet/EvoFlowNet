@@ -1,14 +1,14 @@
 # Contributing
 
-Thanks for your interest. This project is meant to be read as much as run — it
-is used for teaching — so clarity of the code and of the reasoning behind it
-counts as much as correctness.
+Thanks for your interest. This project is meant to be read as much as run, so
+clarity of the code and of the reasoning behind it counts as much as
+correctness.
 
 ## Setup
 
 ```bash
-git clone https://github.com/SimonCrouzet/evoflownet
-cd evoflownet
+git clone https://github.com/SimonCrouzet/EvoFlowNet
+cd EvoFlowNet
 uv sync                     # GPU-first: installs the CUDA build of torch
 uv run pre-commit install   # installs the pre-commit and commit-msg hooks
 ```
@@ -98,7 +98,7 @@ wrong distribution passes a naive test suite. Please do not write that suite.
 ## Reporting things
 
 Bugs and proposals go to
-[Issues](https://github.com/SimonCrouzet/evoflownet/issues); the templates ask
+[Issues](https://github.com/SimonCrouzet/EvoFlowNet/issues); the templates ask
 for a seed and configuration because sampling bugs usually cannot be reproduced
 without them. Vulnerabilities go through [SECURITY.md](SECURITY.md), privately.
 
