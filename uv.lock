@@ -331,7 +331,7 @@ resolution-markers = [
     "python_full_version < '3.12'",
 ]
 dependencies = [
-    { name = "cuda-pathfinder", marker = "extra == 'extra-10-evoflownet-cuda'" },
+    { name = "cuda-pathfinder", marker = "(python_full_version < '3.15' and extra == 'extra-10-evoflownet-cuda') or (extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/40/f3/f9d1095f90d2a4df24cfcafe7487fd9444c6dacb94e3722be6fedd8ac26c/cuda_bindings-12.9.7-cp311-cp311-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:16043ef5b15ab88fe9954c5c2061b1d8007591b27f2c916331056de0ebc6187e", size = 7114834, upload-time = "2026-05-27T18:44:07.746Z" },
@@ -363,7 +363,7 @@ resolution-markers = [
     "python_full_version < '3.12'",
 ]
 dependencies = [
-    { name = "cuda-pathfinder", marker = "(extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda') or (extra != 'extra-10-evoflownet-cpu' and extra != 'extra-10-evoflownet-cuda')" },
+    { name = "cuda-pathfinder", marker = "(python_full_version < '3.15' and extra != 'extra-10-evoflownet-cpu' and extra != 'extra-10-evoflownet-cuda') or (extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/51/6b/457ca12dad3ee9bfcc9a545cfd6b64b359ba49de40f776f6e028e678f262/cuda_bindings-13.3.1-cp311-cp311-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:c5879712accf6e14bb01aa5e67440eb84998b8d104b509cc7a6dc0b8f656a474", size = 6053539, upload-time = "2026-05-29T23:11:43.19Z" },
@@ -510,16 +510,16 @@ dependencies = [
     { name = "hydra-core" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
     { name = "numpy", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
-    { name = "torch", version = "2.13.0", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-10-evoflownet-cpu') or (extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
+    { name = "torch", version = "2.13.0", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(python_full_version < '3.15' and sys_platform == 'darwin' and extra == 'extra-10-evoflownet-cpu') or (python_full_version >= '3.15' and extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda') or (sys_platform != 'darwin' and extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
     { name = "torch", version = "2.13.0", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda') or (extra != 'extra-10-evoflownet-cpu' and extra != 'extra-10-evoflownet-cuda')" },
-    { name = "torch", version = "2.13.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-10-evoflownet-cpu') or (extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
+    { name = "torch", version = "2.13.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(python_full_version >= '3.15' and extra == 'extra-10-evoflownet-cpu') or (python_full_version < '3.15' and extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda') or (sys_platform != 'darwin' and extra == 'extra-10-evoflownet-cpu')" },
     { name = "torch", version = "2.13.0+cu126", source = { registry = "https://download.pytorch.org/whl/cu126" }, marker = "extra == 'extra-10-evoflownet-cuda'" },
 ]
 
 [package.optional-dependencies]
 cpu = [
-    { name = "torch", version = "2.13.0", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform == 'darwin' and extra == 'extra-10-evoflownet-cpu') or (extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
-    { name = "torch", version = "2.13.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(sys_platform != 'darwin' and extra == 'extra-10-evoflownet-cpu') or (extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
+    { name = "torch", version = "2.13.0", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(python_full_version < '3.15' and sys_platform == 'darwin' and extra == 'extra-10-evoflownet-cpu') or (python_full_version >= '3.15' and extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda') or (sys_platform != 'darwin' and extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
+    { name = "torch", version = "2.13.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(python_full_version >= '3.15' and extra == 'extra-10-evoflownet-cpu') or (python_full_version < '3.15' and extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda') or (sys_platform != 'darwin' and extra == 'extra-10-evoflownet-cpu')" },
 ]
 cuda = [
     { name = "torch", version = "2.13.0+cu126", source = { registry = "https://download.pytorch.org/whl/cu126" } },
@@ -555,7 +555,7 @@ requires-dist = [
     { name = "transformers", marker = "extra == 'plm'", specifier = ">=4.44" },
     { name = "wandb", marker = "extra == 'wandb'", specifier = ">=0.17" },
 ]
-provides-extras = ["wandb", "plm", "cpu", "cuda"]
+provides-extras = ["wandb", "plm", "cuda", "cpu"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -568,7 +568,7 @@ dev = [
 ]
 docs = [
     { name = "mkdocs-material", specifier = ">=9.5" },
-    { name = "mkdocstrings", extras = ["python"], specifier = ">=0.26" },
+    { name = "mkdocstrings", extras = ["python"], specifier = ">=1.0.6" },
 ]
 
 [[package]]
@@ -2364,18 +2364,17 @@ name = "torch"
 version = "2.13.0"
 source = { registry = "https://download.pytorch.org/whl/cpu" }
 resolution-markers = [
-    "python_full_version >= '3.15' and sys_platform == 'darwin'",
     "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'darwin'",
     "python_full_version < '3.12' and sys_platform == 'darwin'",
 ]
 dependencies = [
-    { name = "filelock", marker = "(sys_platform == 'darwin' and extra == 'extra-10-evoflownet-cpu') or (extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
-    { name = "fsspec", marker = "(sys_platform == 'darwin' and extra == 'extra-10-evoflownet-cpu') or (extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
-    { name = "jinja2", marker = "(sys_platform == 'darwin' and extra == 'extra-10-evoflownet-cpu') or (extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
-    { name = "networkx", marker = "(sys_platform == 'darwin' and extra == 'extra-10-evoflownet-cpu') or (extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
-    { name = "setuptools", marker = "(sys_platform == 'darwin' and extra == 'extra-10-evoflownet-cpu') or (extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
-    { name = "sympy", marker = "(sys_platform == 'darwin' and extra == 'extra-10-evoflownet-cpu') or (extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
-    { name = "typing-extensions", marker = "(sys_platform == 'darwin' and extra == 'extra-10-evoflownet-cpu') or (extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
+    { name = "filelock", marker = "(python_full_version < '3.15' and sys_platform == 'darwin' and extra == 'extra-10-evoflownet-cpu') or (python_full_version >= '3.15' and extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda') or (sys_platform != 'darwin' and extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
+    { name = "fsspec", marker = "(python_full_version < '3.15' and sys_platform == 'darwin' and extra == 'extra-10-evoflownet-cpu') or (python_full_version >= '3.15' and extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda') or (sys_platform != 'darwin' and extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
+    { name = "jinja2", marker = "(python_full_version < '3.15' and sys_platform == 'darwin' and extra == 'extra-10-evoflownet-cpu') or (python_full_version >= '3.15' and extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda') or (sys_platform != 'darwin' and extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
+    { name = "networkx", marker = "(python_full_version < '3.15' and sys_platform == 'darwin' and extra == 'extra-10-evoflownet-cpu') or (python_full_version >= '3.15' and extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda') or (sys_platform != 'darwin' and extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
+    { name = "setuptools", marker = "(python_full_version < '3.15' and sys_platform == 'darwin' and extra == 'extra-10-evoflownet-cpu') or (python_full_version >= '3.15' and extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda') or (sys_platform != 'darwin' and extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
+    { name = "sympy", marker = "(python_full_version < '3.15' and sys_platform == 'darwin' and extra == 'extra-10-evoflownet-cpu') or (python_full_version >= '3.15' and extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda') or (sys_platform != 'darwin' and extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
+    { name = "typing-extensions", marker = "(python_full_version < '3.15' and sys_platform == 'darwin' and extra == 'extra-10-evoflownet-cpu') or (python_full_version >= '3.15' and extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda') or (sys_platform != 'darwin' and extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
 ]
 wheels = [
     { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.13.0-cp311-cp311-macosx_14_0_arm64.whl", hash = "sha256:e76f9bcecc52b8ff711239a2f7547d5353df95878ab232f0773c1d95928b92f8", upload-time = "2026-07-08T12:26:13Z" },
@@ -2440,16 +2439,17 @@ source = { registry = "https://download.pytorch.org/whl/cpu" }
 resolution-markers = [
     "python_full_version >= '3.15' and sys_platform != 'darwin'",
     "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform != 'darwin'",
+    "python_full_version >= '3.15' and sys_platform == 'darwin'",
     "python_full_version < '3.12' and sys_platform != 'darwin'",
 ]
 dependencies = [
-    { name = "filelock", marker = "(sys_platform != 'darwin' and extra == 'extra-10-evoflownet-cpu') or (extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
-    { name = "fsspec", marker = "(sys_platform != 'darwin' and extra == 'extra-10-evoflownet-cpu') or (extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
-    { name = "jinja2", marker = "(sys_platform != 'darwin' and extra == 'extra-10-evoflownet-cpu') or (extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
-    { name = "networkx", marker = "(sys_platform != 'darwin' and extra == 'extra-10-evoflownet-cpu') or (extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
-    { name = "setuptools", marker = "(sys_platform != 'darwin' and extra == 'extra-10-evoflownet-cpu') or (extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
-    { name = "sympy", marker = "(sys_platform != 'darwin' and extra == 'extra-10-evoflownet-cpu') or (extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
-    { name = "typing-extensions", marker = "(sys_platform != 'darwin' and extra == 'extra-10-evoflownet-cpu') or (extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda')" },
+    { name = "filelock", marker = "(python_full_version >= '3.15' and extra == 'extra-10-evoflownet-cpu') or (python_full_version < '3.15' and extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda') or (sys_platform != 'darwin' and extra == 'extra-10-evoflownet-cpu')" },
+    { name = "fsspec", marker = "(python_full_version >= '3.15' and extra == 'extra-10-evoflownet-cpu') or (python_full_version < '3.15' and extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda') or (sys_platform != 'darwin' and extra == 'extra-10-evoflownet-cpu')" },
+    { name = "jinja2", marker = "(python_full_version >= '3.15' and extra == 'extra-10-evoflownet-cpu') or (python_full_version < '3.15' and extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda') or (sys_platform != 'darwin' and extra == 'extra-10-evoflownet-cpu')" },
+    { name = "networkx", marker = "(python_full_version >= '3.15' and extra == 'extra-10-evoflownet-cpu') or (python_full_version < '3.15' and extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda') or (sys_platform != 'darwin' and extra == 'extra-10-evoflownet-cpu')" },
+    { name = "setuptools", marker = "(python_full_version >= '3.15' and extra == 'extra-10-evoflownet-cpu') or (python_full_version < '3.15' and extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda') or (sys_platform != 'darwin' and extra == 'extra-10-evoflownet-cpu')" },
+    { name = "sympy", marker = "(python_full_version >= '3.15' and extra == 'extra-10-evoflownet-cpu') or (python_full_version < '3.15' and extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda') or (sys_platform != 'darwin' and extra == 'extra-10-evoflownet-cpu')" },
+    { name = "typing-extensions", marker = "(python_full_version >= '3.15' and extra == 'extra-10-evoflownet-cpu') or (python_full_version < '3.15' and extra == 'extra-10-evoflownet-cpu' and extra == 'extra-10-evoflownet-cuda') or (sys_platform != 'darwin' and extra == 'extra-10-evoflownet-cpu')" },
 ]
 wheels = [
     { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.13.0%2Bcpu-cp311-cp311-linux_s390x.whl", hash = "sha256:6e9817dbdf5ea76789babd46e457eac5bf14ff566cf85f8addbfdff2d56601ce", upload-time = "2026-07-08T19:27:52Z" },
