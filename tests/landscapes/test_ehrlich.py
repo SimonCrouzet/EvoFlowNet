@@ -216,3 +216,23 @@ class TestEnumeration:
         landscape = EhrlichLandscape(sequence_length=64, vocab_size=20)
         with pytest.raises(ValueError, match="enumeration limit"):
             landscape.enumerate()
+
+
+class TestParameterAccessors:
+    def test_the_instance_reports_its_own_definition(self):
+        # A benchmark that cannot state its parameters cannot be reproduced from
+        # a results table.
+        landscape = EhrlichLandscape(
+            sequence_length=24, vocab_size=5, n_motifs=2, motif_length=4, quantization=2
+        )
+        assert landscape.n_motifs == 2
+        assert landscape.motif_length == 4
+        assert landscape.quantization == 2
+        assert landscape.motifs.shape == (2, 4)
+        assert landscape.spacings.shape == (2, 4)
+
+    def test_length_one_sequences_have_no_adjacency_to_constrain(self):
+        landscape = EhrlichLandscape(
+            sequence_length=1, vocab_size=3, n_motifs=1, motif_length=1, max_spacing=1, seed=0
+        )
+        assert landscape.is_feasible(np.zeros((3, 1), dtype=np.int32)).all()

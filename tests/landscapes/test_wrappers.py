@@ -8,6 +8,7 @@ from evoflownet.landscapes.wrappers import (
     Budgeted,
     BudgetExhaustedError,
     Cached,
+    LandscapeWrapper,
     Noisy,
 )
 
@@ -198,3 +199,30 @@ class TestComposition:
         noisy = assay.inner
         assert isinstance(noisy, Noisy)
         assert noisy.inner is landscape
+
+
+class TestPassthrough:
+    """Members the wrappers forward without changing, exercised through a wrapper."""
+
+    def test_feasibility_is_forwarded(self):
+        constrained = EhrlichLandscape(
+            sequence_length=12, vocab_size=5, motif_length=2, transition_density=0.3, seed=2
+        )
+        rng = np.random.default_rng(0)
+        candidates = rng.integers(0, 5, size=(200, 12))
+        assay = Budgeted(constrained, max_evaluations=10_000)
+        assert np.array_equal(assay.is_feasible(candidates), constrained.is_feasible(candidates))
+
+    def test_enumeration_is_forwarded(self, landscape):
+        assay = Cached(landscape)
+        assert np.array_equal(assay.enumerate(), landscape.enumerate())
+
+    def test_a_bare_wrapper_scores_exactly_like_its_inner_landscape(self, landscape, sequences):
+        # LandscapeWrapper on its own must be transparent, so that anything a
+        # subclass changes is visibly its own doing.
+        assay = LandscapeWrapper(landscape)
+        assert np.array_equal(assay.evaluate(sequences), landscape.evaluate(sequences))
+
+    def test_configuration_is_readable(self, landscape):
+        assert Noisy(landscape, scale=0.25).scale == 0.25
+        assert Budgeted(landscape, max_evaluations=7).max_evaluations == 7
