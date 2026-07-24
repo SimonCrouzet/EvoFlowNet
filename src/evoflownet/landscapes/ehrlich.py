@@ -200,6 +200,21 @@ class EhrlichLandscape(FitnessLandscape):
         return self._transitions.copy()
 
     @property
+    def n_motifs(self) -> int:
+        """Number of motifs ``c`` that must be satisfied simultaneously."""
+        return self._n_motifs
+
+    @property
+    def motif_length(self) -> int:
+        """Tokens per motif, ``k``."""
+        return self._motif_length
+
+    @property
+    def quantization(self) -> int:
+        """Reward levels per motif, ``q``."""
+        return self._quantization
+
+    @property
     def motifs(self) -> Tokens:
         """The ``(n_motifs, motif_length)`` motif tokens."""
         return self._motifs.copy()
