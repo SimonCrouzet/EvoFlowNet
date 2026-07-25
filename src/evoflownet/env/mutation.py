@@ -21,10 +21,18 @@ been applied. Two consequences follow, and both matter:
 * Its parents in the graph are the ``k`` states reached by undoing any single
   one, so the uniform backward policy is exactly ``1/k`` per parent.
 
-The second point is the useful one. ``P_B`` here is not something that has to be
-learned: the lattice determines it in closed form. Anything a learned backward
-policy contributes on this graph is error, and that error enters the trajectory
-balance loss directly as bias in the sampled distribution.
+The second point makes the uniform backward policy cheap to compute exactly:
+``1/k`` per parent, with no model and no learning. Note carefully what this does
+*not* mean. ``P_B`` is not a quantity that can be got wrong in a way that biases
+the result -- Malkin et al. show that "for any choice of backward policy
+``P_B``, there is a unique flow ... and thus a unique corresponding forward
+policy", so every valid ``P_B`` still yields a ``P_F`` sampling proportional to
+reward. Choosing uniform is a matter of cost and variance, not correctness, and
+they report a *learned* ``P_B`` converging faster on some tasks.
+
+MOGFN-AL makes the same observation about this graph -- "``P_B`` here is not
+trivial as there are multiple ways (orders) of generating the set" -- and also
+settles on uniform.
 
 Action encoding
 ---------------

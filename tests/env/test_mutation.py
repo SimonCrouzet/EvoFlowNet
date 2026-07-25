@@ -5,10 +5,12 @@ backward edges are exactly its forward edges reversed, and whose masks do not
 lie. Those are properties of the graph rather than of any sampler, so they are
 checked here by walking and enumerating the graph directly.
 
-The path-counting tests matter most. The claim that a variant with ``k``
-mutations is reached by exactly ``k!`` trajectories is what makes the backward
-policy available in closed form; it is verified by exhaustive enumeration rather
-than assumed.
+The path-counting tests matter most. A variant with ``k`` mutations is reached
+by exactly ``k!`` trajectories and has exactly ``k`` parents, so the uniform
+backward policy is ``1/k`` without a model. That is a statement about cost, not
+correctness -- any valid ``P_B`` induces a forward policy sampling proportional
+to reward -- but the arithmetic still has to be right, so it is verified by
+exhaustive enumeration rather than assumed.
 """
 
 import itertools
@@ -178,7 +180,7 @@ class TestPathCounting:
         assert env.log_n_trajectories(state)[0] == pytest.approx(math.log(math.factorial(k)))
 
     def test_number_of_parents_equals_the_mutation_count(self):
-        # This is what makes uniform P_B exactly 1/k, with no learning required.
+        # This is what lets uniform P_B be computed as 1/k without a model.
         env = make_env(length=6, symbols="ABC")
         state = env.initial(1)
         for k in range(1, 5):
