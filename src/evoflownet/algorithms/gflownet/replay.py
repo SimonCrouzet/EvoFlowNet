@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import torch
 
-from evoflownet.algorithms.gflownet.sampling import Trajectories
+from evoflownet.algorithms.gflownet.sampling import Trajectories, _multinomial
 from evoflownet.env.base import State
 from evoflownet.models.policy import to_tensor
 
@@ -127,7 +127,7 @@ def _backward_paths(
         # discarded by the active mask.
         probabilities = probabilities.clone()
         probabilities[exhausted, -1] = 1.0
-        actions = torch.multinomial(probabilities, 1, generator=generator).squeeze(1)
+        actions = _multinomial(probabilities, generator)
 
         for row in np.flatnonzero(active):
             reversed_paths[row].append(int(actions[row]))
