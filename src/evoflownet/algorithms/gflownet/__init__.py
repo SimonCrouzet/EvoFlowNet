@@ -9,6 +9,7 @@ from evoflownet.algorithms.gflownet.objectives import (
     parameter_groups,
 )
 from evoflownet.algorithms.gflownet.replay import replay_trajectories
+from evoflownet.algorithms.gflownet.sampler import GFlowNetSampler
 from evoflownet.algorithms.gflownet.sampling import Trajectories, sample_trajectories
 from evoflownet.algorithms.gflownet.training import (
     TrainingConfig,
@@ -21,6 +22,7 @@ __all__ = [
     "LOG_Z_LR_MULTIPLIER",
     "ContrastiveBalance",
     "GFlowNetObjective",
+    "GFlowNetSampler",
     "TrainingConfig",
     "TrainingResult",
     "Trajectories",
