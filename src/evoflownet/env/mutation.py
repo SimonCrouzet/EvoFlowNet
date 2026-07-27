@@ -45,6 +45,7 @@ without any reshaping.
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -315,6 +316,51 @@ class MutationEnvironment(SequenceEnvironment):
             sequences[rows, positions] = self._parent[positions]
 
         return State(sequences=sequences, stopped=stopped)
+
+    def enumerate_terminal_states(self) -> Tokens:
+        """Every sequence reachable from the parent.
+
+        The reachable set is the Hamming ball of radius ``max_mutations`` around
+        the parent, not the whole sequence space -- which matters for any exact
+        distributional comparison, since the target must be normalised over what
+        the environment can actually produce rather than over everything that
+        exists. Feasibility masking shrinks it further, so this is an upper
+        bound when a transition matrix is in use.
+
+        Returns:
+            An ``(m, length)`` array of distinct reachable sequences, the parent
+            first.
+
+        Raises:
+            ValueError: If the reachable set exceeds
+            :data:`~evoflownet.landscapes.base.MAX_ENUMERABLE_SIZE`.
+        """
+        from itertools import combinations, product  # noqa: PLC0415 - only needed here
+
+        from evoflownet.landscapes.base import MAX_ENUMERABLE_SIZE  # noqa: PLC0415
+
+        alternatives = [
+            [t for t in range(self._alphabet.size) if t != int(self._parent[position])]
+            for position in range(self._length)
+        ]
+        size = sum(
+            math.comb(self._length, k) * (self._alphabet.size - 1) ** k
+            for k in range(self._max_mutations + 1)
+        )
+        if size > MAX_ENUMERABLE_SIZE:
+            raise ValueError(
+                f"{size:,} sequences are reachable, above the "
+                f"{MAX_ENUMERABLE_SIZE:,} enumeration limit"
+            )
+
+        reachable = [self._parent.copy()]
+        for k in range(1, self._max_mutations + 1):
+            for positions in combinations(range(self._length), k):
+                for tokens in product(*(alternatives[p] for p in positions)):
+                    variant = self._parent.copy()
+                    variant[list(positions)] = tokens
+                    reachable.append(variant)
+        return np.stack(reachable)
 
     def log_n_trajectories(self, state: State) -> npt.NDArray[np.float64]:
         """Log of how many distinct paths reach each state from the parent.
