@@ -107,6 +107,20 @@ jobs:
         # Catches a malformed README or bad classifier here rather than at the
         # point of an irreversible upload to PyPI.
         run: uvx twine check --strict dist/*
+      - name: Install the built wheel and run the console script
+        # A build that imports is not a build that works: the declared console
+        # script once pointed at a module that did not exist, and neither the
+        # build nor twine check noticed, because neither runs it.
+        run: |
+          python -m venv /tmp/wheelcheck
+          /tmp/wheelcheck/bin/pip install --quiet dist/*.whl
+          /tmp/wheelcheck/bin/evoflownet --help
+          /tmp/wheelcheck/bin/python -c "
+          from importlib.resources import files
+          assert files('evoflownet.configs').joinpath('train.yaml').is_file()
+          print('packaged configs present')
+          "
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: distributions

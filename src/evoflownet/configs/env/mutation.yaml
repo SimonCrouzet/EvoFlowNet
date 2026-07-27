@@ -1,0 +1,4 @@
+_target_: evoflownet.env.mutation.MutationEnvironment
+# parent and alphabet are supplied by the landscape at construction time.
+max_mutations: 4
+allow_stop_before_max: true

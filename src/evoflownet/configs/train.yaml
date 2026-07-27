@@ -1,0 +1,18 @@
+# Default training run. Override any group from the command line, e.g.
+#   evoflownet train landscape=gb1 training.steps=5000 tracker=wandb
+defaults:
+  - landscape: ehrlich
+  - env: mutation
+  - reward: tempered
+  - policy: mlp
+  - training: trajectory_balance
+  - tracker: console
+  - _self_
+
+# Seeds every stochastic component. Recorded with the run, because a result
+# whose seed was not written down cannot be reproduced.
+seed: 0
+
+hydra:
+  run:
+    dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
