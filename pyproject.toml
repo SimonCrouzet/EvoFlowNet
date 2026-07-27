@@ -74,6 +74,9 @@ evoflownet = "evoflownet.cli.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/evoflownet"]
+# The YAML under src/evoflownet/configs is picked up by the packages entry
+# above, since it lives inside the package. A force-include would duplicate it
+# and hatchling refuses to write the same path twice.
 
 # Development dependencies, managed by uv. These are not part of any published
 # extra: nobody installing the library from PyPI should pull in a test runner.
