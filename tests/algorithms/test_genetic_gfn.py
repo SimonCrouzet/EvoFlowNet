@@ -142,7 +142,7 @@ class TestTraining:
             Peaked(),
             TemperedReward(beta=1.0),
             TrainingConfig(steps=60, batch_size=32, learning_rate=1e-2, seed=0),
-            GeneticAlgorithm(env, seed=0),
+            genetic=GeneticAlgorithm(env, seed=0),
             genetic_config=GeneticConfig(offspring=16, warmup=5),
         )
         assert np.isfinite(result.losses).all()
@@ -163,14 +163,14 @@ class TestTraining:
             env,
             make_policy(env),
             *shared,
-            GeneticAlgorithm(env, seed=0),
+            genetic=GeneticAlgorithm(env, seed=0),
             genetic_config=GeneticConfig(offspring=48, warmup=0, mix=0.5),
         )
         unguided = train_genetic_gfn(
             env,
             make_policy(env),
             *shared,
-            GeneticAlgorithm(env, seed=0),
+            genetic=GeneticAlgorithm(env, seed=0),
             genetic_config=GeneticConfig(offspring=48, warmup=0, mix=0.0),
         )
         assert unguided.oracle_calls == 30 * 32
@@ -186,7 +186,7 @@ class TestTraining:
             Peaked(),
             TemperedReward(beta=1.0),
             TrainingConfig(steps=6, batch_size=16, seed=0),
-            GeneticAlgorithm(env, seed=0),
+            genetic=GeneticAlgorithm(env, seed=0),
             genetic_config=GeneticConfig(offspring=16, warmup=1, mix=1.0),
         )
         # Step 0 is warmup and draws 16 on-policy; the remaining five breed only.
@@ -201,7 +201,7 @@ class TestTraining:
             Peaked(),
             TemperedReward(beta=1.0),
             TrainingConfig(steps=10, batch_size=32, seed=0),
-            GeneticAlgorithm(env, seed=0),
+            genetic=GeneticAlgorithm(env, seed=0),
             genetic_config=GeneticConfig(offspring=16, warmup=10, mix=0.5),
         )
         # Every step is warmup, so nothing beyond the on-policy batch is scored.
@@ -216,7 +216,7 @@ class TestTraining:
             Peaked(),
             TemperedReward(beta=1.0),
             TrainingConfig(steps=20, batch_size=32, seed=0),
-            GeneticAlgorithm(env, seed=0),
+            genetic=GeneticAlgorithm(env, seed=0),
             genetic_config=GeneticConfig(offspring=16, warmup=2),
             objective=ContrastiveBalance(),
         )
@@ -232,7 +232,7 @@ class TestTraining:
                 Peaked(),
                 TemperedReward(beta=1.0),
                 TrainingConfig(steps=5, batch_size=8, seed=0),
-                GeneticAlgorithm(env, seed=0),
+                genetic=GeneticAlgorithm(env, seed=0),
                 objective=DetailedBalance(),
             )
 
@@ -247,7 +247,7 @@ class TestTraining:
             landscape,
             reward,
             config,
-            GeneticAlgorithm(env, seed=0),
+            genetic=GeneticAlgorithm(env, seed=0),
             genetic_config=GeneticConfig(offspring=32, warmup=5),
         )
         plain = train_trajectory_balance(env, make_policy(env), landscape, reward, config)
