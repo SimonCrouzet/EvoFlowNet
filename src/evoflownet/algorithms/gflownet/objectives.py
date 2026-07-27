@@ -83,6 +83,16 @@ class GFlowNetObjective(ABC):
         """Whether this objective trains a learned partition function."""
         return True
 
+    @property
+    def needs_state_rewards(self) -> bool:
+        """Whether the trainer must score every visited state, not just terminals.
+
+        Only the forward-looking parameterisation needs this. It is asked
+        rather than assumed so that scoring intermediate states -- which costs
+        proxy evaluations -- happens only when an objective will use them.
+        """
+        return False
+
     def __repr__(self) -> str:
         """Name the objective."""
         return f"{type(self).__name__}()"

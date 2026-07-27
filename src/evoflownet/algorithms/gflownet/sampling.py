@@ -15,7 +15,7 @@ would optimise the wrong thing while looking entirely reasonable.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -40,24 +40,102 @@ class Trajectories:
         log_backward: ``(n,)`` summed ``log P_B``, carrying gradients only when
             the backward policy is learned.
         lengths: ``(n,)`` number of actions taken, including the stop action.
+        states: ``(n, T + 1, length)`` every state visited, padded on the right
+            by repeating the terminal state. Recorded because the
+            detailed-balance family constrains flow through *states*, which the
+            summed quantities above cannot recover.
+        step_log_forward: ``(n, T)`` per-step ``log P_F``, carrying gradients.
+        step_log_backward: ``(n, T)`` per-step ``log P_B``.
+        active: ``(n, T)`` whether each step was a real transition rather than
+            padding after termination.
+        stopping: ``(n, T)`` whether the step took the stop action, whose
+            destination is terminal and whose flow is the reward rather than an
+            estimate.
+        state_log_rewards: ``(n, T + 1)`` ``log R(s)`` at every visited state,
+            attached by the trainer when the objective asks for it. Available
+            here because every state in a mutation lattice is a complete
+            sequence; an autoregressive environment could not supply it.
     """
 
     terminal: Tokens
     log_forward: torch.Tensor
     log_backward: torch.Tensor
     lengths: npt_int
+    states: npt_int | None = None
+    step_log_forward: torch.Tensor | None = None
+    step_log_backward: torch.Tensor | None = None
+    active: npt_bool | None = None
+    stopping: npt_bool | None = None
+    state_log_rewards: torch.Tensor | None = None
 
     def __len__(self) -> int:
         """Number of trajectories."""
         return int(self.terminal.shape[0])
+
+    def with_state_rewards(self, state_log_rewards: torch.Tensor) -> Trajectories:
+        """Return a copy carrying rewards for every visited state.
+
+        Args:
+            state_log_rewards: An ``(n, T + 1)`` tensor of ``log R(s)``.
+
+        Returns:
+            The same trajectories with the rewards attached.
+        """
+        return replace(self, state_log_rewards=state_log_rewards)
+
+    def require_steps(self) -> _Steps:
+        """Return the per-step record, or explain why it is missing.
+
+        Returns:
+            States, per-step log probabilities and the two masks.
+
+        Raises:
+            ValueError: If this batch was built without per-step data --
+                replayed trajectories, for instance. A detailed-balance
+                objective cannot be computed from summed quantities, and
+                silently falling back to trajectory balance would misreport
+                which objective produced a result.
+        """
+        if (
+            self.states is None
+            or self.step_log_forward is None
+            or self.step_log_backward is None
+            or self.active is None
+            or self.stopping is None
+        ):
+            raise ValueError(
+                "these trajectories carry no per-step record, which the "
+                "detailed-balance family requires; sample them with "
+                "sample_trajectories rather than reconstructing them"
+            )
+        return _Steps(
+            self.states,
+            self.step_log_forward,
+            self.step_log_backward,
+            self.active,
+            self.stopping,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _Steps:
+    """The per-step record, once its presence has been checked."""
+
+    states: npt_int
+    log_forward: torch.Tensor
+    log_backward: torch.Tensor
+    active: npt_bool
+    stopping: npt_bool
 
 
 if TYPE_CHECKING:
     import numpy.typing as npt
 
     npt_int = npt.NDArray[np.integer]
-else:  # pragma: no cover - only an alias for annotations
+    npt_bool = npt.NDArray[np.bool_]
+else:  # pragma: no cover - only aliases for annotations
     npt_int = np.ndarray
+    npt_bool = np.ndarray
 
 
 def sample_trajectories(  # noqa: PLR0913 - each argument is part of the rollout contract
@@ -99,6 +177,11 @@ def sample_trajectories(  # noqa: PLR0913 - each argument is part of the rollout
     log_forward = torch.zeros(n, device=device)
     log_backward = torch.zeros(n, device=device)
     lengths = np.zeros(n, dtype=np.int64)
+    visited = [state.sequences.copy()]
+    step_forward: list[torch.Tensor] = []
+    step_backward: list[torch.Tensor] = []
+    was_active: list[np.ndarray] = []
+    was_stop: list[np.ndarray] = []
 
     # Every forward action strictly increases the mutation count, and the stop
     # action ends the trajectory, so termination is bounded. Exceeding this
@@ -148,6 +231,16 @@ def sample_trajectories(  # noqa: PLR0913 - each argument is part of the rollout
             contributes, step_log_pb, torch.zeros_like(step_log_pb)
         )
 
+        # Store the *masked* values. A row that has already stopped has a
+        # fully masked action distribution, so its raw log prob is -inf; kept
+        # unmasked, multiplying it by a zero weight later yields nan rather
+        # than zero and destroys the batch.
+        step_forward.append(torch.where(live_tensor, step_log_pf, torch.zeros_like(step_log_pf)))
+        step_backward.append(torch.where(contributes, step_log_pb, torch.zeros_like(step_log_pb)))
+        was_active.append(live.copy())
+        was_stop.append((actions == env.n_actions - 1).cpu().numpy() & live)
+        visited.append(next_state.sequences.copy())
+
         state = next_state
     else:
         if not env.is_terminal(state).all():
@@ -161,6 +254,11 @@ def sample_trajectories(  # noqa: PLR0913 - each argument is part of the rollout
         log_forward=log_forward,
         log_backward=log_backward,
         lengths=lengths,
+        states=np.stack(visited, axis=1),
+        step_log_forward=torch.stack(step_forward, dim=1),
+        step_log_backward=torch.stack(step_backward, dim=1),
+        active=np.stack(was_active, axis=1),
+        stopping=np.stack(was_stop, axis=1),
     )
 
 

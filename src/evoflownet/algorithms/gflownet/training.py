@@ -26,7 +26,7 @@ from evoflownet.algorithms.gflownet.objectives import (
     TrajectoryBalance,
     parameter_groups,
 )
-from evoflownet.algorithms.gflownet.sampling import sample_trajectories
+from evoflownet.algorithms.gflownet.sampling import Trajectories, sample_trajectories
 from evoflownet.tracking.base import NoOpTracker
 
 if TYPE_CHECKING:
@@ -140,6 +140,10 @@ def train_trajectory_balance(  # noqa: PLR0913 - the run is defined by its parts
         values = landscape.evaluate(trajectories.terminal)
         result.oracle_calls += int(trajectories.terminal.shape[0])
         log_rewards = torch.as_tensor(reward.log_reward(values), dtype=torch.float32)
+        if loss_fn.needs_state_rewards:
+            trajectories = trajectories.with_state_rewards(
+                _score_states(trajectories, landscape, reward)
+            )
 
         loss = loss_fn.loss(trajectories, log_rewards, policy)
         optimiser.zero_grad()
@@ -165,3 +169,28 @@ def train_trajectory_balance(  # noqa: PLR0913 - the run is defined by its parts
 
     result.final_log_z = float(policy.log_z.detach().item())
     return result
+
+
+def _score_states(
+    trajectories: Trajectories,
+    landscape: FitnessLandscape,
+    reward: Reward,
+) -> torch.Tensor:
+    """Score every visited state, for the forward-looking parameterisation.
+
+    Only reachable because a state in the mutation lattice is a complete
+    sequence. These evaluations are charged to whatever the trainer was pointed
+    at -- in a campaign that is the surrogate proxy, not the assay.
+
+    Args:
+        trajectories: Completed trajectories carrying their visited states.
+        landscape: What to score the states against.
+        reward: Transforms objective values into log rewards.
+
+    Returns:
+        An ``(n, T + 1)`` tensor of ``log R(s)``.
+    """
+    states = np.asarray(trajectories.require_steps().states)
+    n, total, length = states.shape
+    values = landscape.evaluate(states.reshape(-1, length))
+    return torch.as_tensor(reward.log_reward(values), dtype=torch.float32).reshape(n, total)

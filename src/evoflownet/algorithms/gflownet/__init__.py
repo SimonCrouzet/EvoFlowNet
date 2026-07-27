@@ -1,5 +1,12 @@
 """GFlowNet training objectives, trajectory sampling and training."""
 
+from evoflownet.algorithms.gflownet.flow_objectives import (
+    DEFAULT_LAMBDA,
+    DetailedBalance,
+    FlowObjective,
+    ForwardLookingDetailedBalance,
+    SubTrajectoryBalance,
+)
 from evoflownet.algorithms.gflownet.objectives import (
     LOG_Z_LR_MULTIPLIER,
     ContrastiveBalance,
@@ -19,10 +26,15 @@ from evoflownet.algorithms.gflownet.training import (
 from evoflownet.algorithms.gflownet.trajectory_balance import trajectory_balance_loss
 
 __all__ = [
+    "DEFAULT_LAMBDA",
     "LOG_Z_LR_MULTIPLIER",
     "ContrastiveBalance",
+    "DetailedBalance",
+    "FlowObjective",
+    "ForwardLookingDetailedBalance",
     "GFlowNetObjective",
     "GFlowNetSampler",
+    "SubTrajectoryBalance",
     "TrainingConfig",
     "TrainingResult",
     "Trajectories",
