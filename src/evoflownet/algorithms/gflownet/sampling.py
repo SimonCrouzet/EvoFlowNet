@@ -187,7 +187,7 @@ def _choose(
     if empty.any():
         probabilities = probabilities.clone()
         probabilities[empty, -1] = 1.0
-    return torch.multinomial(probabilities, num_samples=1, generator=generator).squeeze(1)
+    return _multinomial(probabilities, generator)
 
 
 def _step_live(
@@ -210,3 +210,24 @@ def _step_live(
     sequences[live] = stepped.sequences
     stopped[live] = stepped.stopped
     return StateType(sequences=sequences, stopped=stopped)
+
+
+def _multinomial(probabilities: torch.Tensor, generator: torch.Generator | None) -> torch.Tensor:
+    """Draw one index per row, tolerating a generator on another device.
+
+    ``torch.multinomial`` requires the generator and the tensor to share a
+    device, so a run with ``device="cuda"`` and a CPU generator -- the obvious
+    way to write a reproducible GPU experiment -- fails outright. Rather than
+    make callers manage that, the draw is performed on the generator's device
+    and the result moved back.
+
+    Reproducibility is preserved exactly: the draw happens under the generator
+    the caller supplied. The cost is one transfer of an ``(n, n_actions)``
+    tensor per step, which is small beside the policy forward pass.
+    """
+    if generator is not None and generator.device != probabilities.device:
+        drawn = torch.multinomial(
+            probabilities.to(generator.device), num_samples=1, generator=generator
+        )
+        return drawn.to(probabilities.device).squeeze(1)
+    return torch.multinomial(probabilities, num_samples=1, generator=generator).squeeze(1)
