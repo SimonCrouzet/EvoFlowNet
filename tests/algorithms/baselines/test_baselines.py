@@ -128,6 +128,47 @@ class TestTheyActuallySearch:
         assert distinct < 32
 
 
+class TestHillClimbingNeighbourhood:
+    """The trajectory constraint is not a state constraint.
+
+    The environment forbids mutating a position twice along one *path*. That
+    does not make a sequence revising an earlier substitution unreachable -- it
+    is a different point in the same Hamming ball, arrived at by a different
+    path. Conflating the two forbade hill climbing from ever fixing a bad
+    substitution, and shrank its neighbourhood toward nothing as it moved, so it
+    ran out of proposals and left most of its oracle budget unspent.
+    """
+
+    def test_it_can_revise_an_existing_substitution(self):
+        env = make_env(length=4, max_mutations=4)
+        climber = HillClimbing(env, seed=0)
+        # Move it onto a design already differing at position 0.
+        climber.observe(np.array([[1, 0, 0, 0]], dtype=np.int32), np.array([[10.0]]))
+        proposals = climber.propose(400)
+        revised = (proposals[:, 0] != 0) & (proposals[:, 0] != 1)
+        assert revised.any(), "hill climbing never revised the existing mutation"
+
+    def test_every_proposal_stays_reachable(self):
+        env = make_env(length=6, max_mutations=3)
+        climber = HillClimbing(env, seed=1)
+        for _ in range(6):
+            proposals = climber.propose(64)
+            assert env.is_reachable(proposals).all()
+            climber.observe(proposals, np.arange(64, dtype=float)[:, None])
+
+    def test_the_neighbourhood_does_not_collapse_as_it_moves(self):
+        # The symptom the bug produced: a neighbourhood shrinking with every
+        # accepted move until the sampler could propose nothing new at all.
+        env = make_env(length=6, max_mutations=3)
+        climber = HillClimbing(env, seed=2)
+        sizes = []
+        for _ in range(5):
+            proposals = climber.propose(500)
+            sizes.append(len({row.tobytes() for row in np.ascontiguousarray(proposals)}))
+            climber.observe(proposals, np.arange(500, dtype=float)[:, None])
+        assert min(sizes) > 1, f"neighbourhood collapsed: {sizes}"
+
+
 class TestGeneticAlgorithm:
     def test_the_published_hyperparameters_are_the_defaults(self):
         # Stanton et al. report p_m = p_r = 1/L. Comparing against anything else

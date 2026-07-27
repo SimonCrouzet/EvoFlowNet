@@ -167,12 +167,19 @@ class HillClimbing(Sampler):
         proposals = np.tile(self._current, (n, 1))
 
         for row in range(n):
-            # Only positions still at the parent token may be mutated, or the
-            # candidate would leave the environment's graph.
-            available = [p for p in range(length) if proposals[row, p] == parent[p]]
-            if not available or (proposals[row] != parent).sum() >= self._env.max_mutations:
-                proposals[row] = parent
-                available = list(range(length))
+            # A position that already differs from the parent may be changed
+            # again: the environment forbids mutating a position twice along one
+            # *trajectory*, but the resulting sequence is a different point in
+            # the same Hamming ball and is reached by a different path. Treating
+            # the trajectory constraint as a state constraint would forbid hill
+            # climbing from ever revising a bad substitution -- which is most of
+            # what hill climbing is for -- and would shrink its neighbourhood
+            # toward nothing as it moved.
+            # At the budget only already-substituted positions can change,
+            # since touching a fresh one would exceed it.
+            mutated = np.flatnonzero(proposals[row] != parent)
+            at_budget = mutated.size >= self._env.max_mutations
+            available = mutated if at_budget else np.arange(length)
             position = int(self._rng.choice(available))
             alternatives = [t for t in range(size) if t != proposals[row, position]]
             proposals[row, position] = self._rng.choice(alternatives)
