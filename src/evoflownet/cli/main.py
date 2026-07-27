@@ -74,6 +74,7 @@ def train(config: DictConfig) -> None:
     )
     reward = hydra.utils.instantiate(config.reward)
     training = hydra.utils.instantiate(config.training)
+    objective = hydra.utils.instantiate(config.objective)
 
     with hydra.utils.instantiate(config.tracker) as tracker:
         tracker.log_config(
@@ -82,15 +83,22 @@ def train(config: DictConfig) -> None:
                 **run_provenance(seed=config.seed),
             }
         )
-        result = train_trajectory_balance(env, policy, landscape, reward, training, tracker=tracker)
-        tracker.log_metrics(
-            {
-                "final_loss": result.losses[-1],
-                "final_log_z": result.final_log_z,
-                "oracle_calls": float(result.oracle_calls),
-            },
-            step=training.steps,
+        result = train_trajectory_balance(
+            env,
+            policy,
+            landscape,
+            reward,
+            training,
+            objective=objective,
+            tracker=tracker,
         )
+        final = {
+            "final_loss": result.losses[-1],
+            "oracle_calls": float(result.oracle_calls),
+        }
+        if objective.uses_log_z:
+            final["final_log_z"] = result.final_log_z
+        tracker.log_metrics(final, step=training.steps)
 
 
 def _starting_sequence(landscape: object) -> np.ndarray:
