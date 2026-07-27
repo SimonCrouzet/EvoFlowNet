@@ -66,6 +66,10 @@ class SequencePolicy(nn.Module):
         n_layers: Number of hidden layers in the trunk. Must be at least 1.
         learn_backward: Whether to learn ``P_B``. When ``False`` the backward
             policy is uniform over the parents permitted by the backward mask.
+        learn_flow: Whether to estimate a state flow ``log F(s)``. Needed by
+            the detailed-balance family, which constrains flow through each
+            *state*; trajectory balance constrains whole trajectories and does
+            not use it.
 
     Raises:
         ValueError: If any size is not positive.
@@ -81,6 +85,7 @@ class SequencePolicy(nn.Module):
         hidden_dim: int = 256,
         n_layers: int = 2,
         learn_backward: bool = False,
+        learn_flow: bool = False,
     ) -> None:
         """Build the trunk and heads."""
         super().__init__()
@@ -97,6 +102,7 @@ class SequencePolicy(nn.Module):
 
         self._n_actions = n_actions
         self._learn_backward = learn_backward
+        self._learn_flow = learn_flow
 
         self.embedding = nn.Embedding(n_tokens, embedding_dim)
 
@@ -111,6 +117,9 @@ class SequencePolicy(nn.Module):
         # shared.
         self.forward_head = nn.Linear(hidden_dim, n_actions)
         self.backward_head = nn.Linear(hidden_dim, n_actions) if learn_backward else None
+        # One scalar per state. Unlike log Z this is a genuine head: the flow
+        # through a state depends on the state.
+        self.flow_head = nn.Linear(hidden_dim, 1) if learn_flow else None
 
         # Not a head: log Z is state-independent, being the total flow through
         # the DAG. Initialised at 0 (Z = 1) and expected to move a long way, so
@@ -126,6 +135,33 @@ class SequencePolicy(nn.Module):
     def learns_backward(self) -> bool:
         """Whether ``P_B`` is learned rather than uniform."""
         return self._learn_backward
+
+    @property
+    def learns_flow(self) -> bool:
+        """Whether a state flow estimate is available."""
+        return self._learn_flow
+
+    def log_flow(self, sequences: torch.Tensor) -> torch.Tensor:
+        """Estimate ``log F(s)`` for a batch of states.
+
+        Args:
+            sequences: An ``(n, length)`` tensor of token indices.
+
+        Returns:
+            An ``(n,)`` tensor of log flows.
+
+        Raises:
+            RuntimeError: If the policy was built without a flow head. Falling
+                back to a constant would silently turn detailed balance into a
+                worse trajectory balance.
+        """
+        if self.flow_head is None:
+            raise RuntimeError(
+                "this policy has no flow head; build it with learn_flow=True to "
+                "use a detailed-balance objective"
+            )
+        flow: torch.Tensor = self.flow_head(self.forward(sequences))
+        return flow.squeeze(-1)
 
     def policy_parameters(self) -> list[nn.Parameter]:
         """Every parameter except ``log Z``.
