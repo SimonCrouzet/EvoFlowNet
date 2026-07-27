@@ -21,11 +21,12 @@ from typing import TYPE_CHECKING
 import numpy as np
 import torch
 
-from evoflownet.algorithms.gflownet.sampling import sample_trajectories
-from evoflownet.algorithms.gflownet.trajectory_balance import (
+from evoflownet.algorithms.gflownet.objectives import (
+    GFlowNetObjective,
+    TrajectoryBalance,
     parameter_groups,
-    trajectory_balance_loss,
 )
+from evoflownet.algorithms.gflownet.sampling import sample_trajectories
 from evoflownet.tracking.base import NoOpTracker
 
 if TYPE_CHECKING:
@@ -99,6 +100,7 @@ def train_trajectory_balance(  # noqa: PLR0913 - the run is defined by its parts
     reward: Reward,
     config: TrainingConfig,
     *,
+    objective: GFlowNetObjective | None = None,
     tracker: Tracker | None = None,
 ) -> TrainingResult:
     """Train a policy to sample proportionally to reward.
@@ -109,12 +111,15 @@ def train_trajectory_balance(  # noqa: PLR0913 - the run is defined by its parts
         landscape: What terminal sequences are scored against.
         reward: Transforms objective values into log rewards.
         config: Run settings.
+        objective: How balance violation is measured. Defaults to trajectory
+            balance.
         tracker: Where to report. Defaults to discarding.
 
     Returns:
         The losses, the learned ``log Z``, and the oracle budget consumed.
     """
     recorder = tracker if tracker is not None else NoOpTracker()
+    loss_fn = objective if objective is not None else TrajectoryBalance()
     optimiser = torch.optim.Adam(
         parameter_groups(
             policy,
@@ -136,7 +141,7 @@ def train_trajectory_balance(  # noqa: PLR0913 - the run is defined by its parts
         result.oracle_calls += int(trajectories.terminal.shape[0])
         log_rewards = torch.as_tensor(reward.log_reward(values), dtype=torch.float32)
 
-        loss = trajectory_balance_loss(trajectories, log_rewards, policy.log_z)
+        loss = loss_fn.loss(trajectories, log_rewards, policy)
         optimiser.zero_grad()
         # torch ships stubs but leaves Tensor.backward unannotated.
         loss.backward()  # type: ignore[no-untyped-call]
@@ -148,7 +153,9 @@ def train_trajectory_balance(  # noqa: PLR0913 - the run is defined by its parts
             recorder.log_metrics(
                 {
                     "loss": loss_value,
-                    "log_z": float(policy.log_z.detach().item()),
+                    **(
+                        {"log_z": float(policy.log_z.detach().item())} if loss_fn.uses_log_z else {}
+                    ),
                     "epsilon": epsilon,
                     "mean_reward": float(np.exp(log_rewards.numpy()).mean()),
                     "oracle_calls": float(result.oracle_calls),

@@ -6,6 +6,7 @@ defaults:
   - reward: tempered
   - policy: mlp
   - training: trajectory_balance
+  - objective: trajectory_balance
   - tracker: console
   - _self_
 

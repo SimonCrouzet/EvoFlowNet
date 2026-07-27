@@ -1,0 +1,5 @@
+_target_: evoflownet.algorithms.gflownet.objectives.ContrastiveBalance
+# Drop pairs whose log rewards differ by less than this (Stable-GFN's noisy
+# gradient pruning). With a noisy fitness oracle, near-tied pairs carry mostly
+# measurement error. 0 disables it.
+prune_threshold: 0.0
