@@ -232,9 +232,22 @@ class MutationEnvironment(SequenceEnvironment):
     def backward_mask(self, state: State) -> npt.NDArray[np.bool_]:
         """Which actions could have produced this state.
 
-        For a state carrying ``k`` mutations these are exactly the ``k``
-        substitutions that introduced them, so a uniform distribution over this
-        mask is the exact backward policy the lattice induces.
+        For an unstopped state carrying ``k`` mutations these are exactly the
+        ``k`` substitutions that introduced them, so a uniform distribution over
+        this mask is the exact backward policy the lattice induces.
+
+        A *stopped* state is different, and getting it wrong is easy. Its only
+        parent is the same state unstopped: the stop action is the sole edge
+        into it. Also marking its mutations would give a terminal ``k + 1``
+        parents instead of one, making the uniform backward policy ``1/(k+1)``
+        where it should be ``1``, and admitting paths that undo a mutation while
+        stopped -- which is not an edge of this graph.
+
+        Under a transition constraint there is a further condition: undoing a
+        mutation must land on a state that is itself feasible. A parent that
+        violates an adjacency is not in the graph, so the edge into it does not
+        exist either -- and a backward walk that ignored this would reconstruct
+        paths the forward direction refuses.
 
         Args:
             state: The current state.
@@ -244,14 +257,59 @@ class MutationEnvironment(SequenceEnvironment):
         """
         n = len(state)
         mask = np.zeros((n, self.n_actions), dtype=np.bool_)
-        mutated = state.sequences != self._parent[None, :]
+
+        running = ~np.asarray(state.stopped, dtype=np.bool_)
+        mutated = (state.sequences != self._parent[None, :]) & running[:, None]
+        if self._transitions is not None:
+            mutated &= self._parent_would_be_feasible(state.sequences)
         rows, positions = np.nonzero(mutated)
         tokens = state.sequences[rows, positions]
         mask[rows, positions * self._alphabet.size + tokens] = True
 
-        # Stopping is undoable exactly when the trajectory is stopped.
         mask[:, self.stop_action] = state.stopped
         return mask
+
+    def is_reachable(self, sequences: Tokens) -> npt.NDArray[np.bool_]:
+        """Report which sequences this environment can actually construct.
+
+        A sequence outside the mutation budget, or infeasible under the
+        transition constraint, is not in the space the policy is defined over.
+        Scoring one is meaningless rather than merely inaccurate, so callers
+        that accept sequences from elsewhere -- a replay buffer, a genetic
+        algorithm, an assay -- should check first.
+
+        Args:
+            sequences: An ``(n, length)`` array of token indices.
+
+        Returns:
+            An ``(n,)`` boolean array.
+        """
+        array = np.asarray(sequences)
+        within_budget = (array != self._parent[None, :]).sum(axis=1) <= self._max_mutations
+        if self._transitions is None:
+            return np.asarray(within_budget, dtype=np.bool_)
+        permitted = self._transitions > 0
+        feasible = np.all(permitted[array[:, :-1], array[:, 1:]], axis=1)
+        return np.asarray(within_budget & feasible, dtype=np.bool_)
+
+    def _parent_would_be_feasible(self, sequences: Tokens) -> npt.NDArray[np.bool_]:
+        """Which single-mutation reversions land on a feasible state.
+
+        Returns:
+            An ``(n, length)`` boolean array, ``True`` where reverting that
+            position keeps every adjacency permitted.
+        """
+        if self._transitions is None:  # pragma: no cover - guarded by the caller
+            return np.ones(sequences.shape, dtype=np.bool_)
+        permitted = self._transitions > 0
+        reverted = np.broadcast_to(self._parent[None, :], sequences.shape)
+
+        allowed = np.ones(sequences.shape, dtype=np.bool_)
+        if self._length > 1:
+            # Reverting position p only disturbs the (p-1, p) and (p, p+1) pairs.
+            allowed[:, 1:] &= permitted[sequences[:, :-1], reverted[:, 1:]]
+            allowed[:, :-1] &= permitted[reverted[:, :-1], sequences[:, 1:]]
+        return allowed
 
     def step(self, state: State, actions: npt.NDArray[np.integer]) -> State:
         """Apply one action per trajectory.

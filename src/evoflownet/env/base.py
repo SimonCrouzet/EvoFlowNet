@@ -177,6 +177,21 @@ class SequenceEnvironment(ABC):
         """
         return np.asarray(state.stopped, dtype=np.bool_)
 
+    def is_reachable(self, sequences: Tokens) -> npt.NDArray[np.bool_]:
+        """Report which sequences this environment can construct.
+
+        Environments with no restriction accept everything. Where a restriction
+        exists, callers that accept sequences from outside -- a replay buffer, a
+        genetic algorithm, an assay -- should check before scoring them.
+
+        Args:
+            sequences: An ``(n, length)`` array of token indices.
+
+        Returns:
+            An ``(n,)`` boolean array.
+        """
+        return np.ones(np.asarray(sequences).shape[0], dtype=np.bool_)
+
     def to_sequences(self, state: State) -> Tokens:
         """Extract the sequences a state represents.
 
