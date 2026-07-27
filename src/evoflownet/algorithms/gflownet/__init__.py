@@ -7,6 +7,12 @@ from evoflownet.algorithms.gflownet.flow_objectives import (
     ForwardLookingDetailedBalance,
     SubTrajectoryBalance,
 )
+from evoflownet.algorithms.gflownet.genetic_gfn import (
+    RANK_OFFSET,
+    GeneticConfig,
+    RankedBuffer,
+    train_genetic_gfn,
+)
 from evoflownet.algorithms.gflownet.objectives import (
     LOG_Z_LR_MULTIPLIER,
     ContrastiveBalance,
@@ -28,12 +34,15 @@ from evoflownet.algorithms.gflownet.trajectory_balance import trajectory_balance
 __all__ = [
     "DEFAULT_LAMBDA",
     "LOG_Z_LR_MULTIPLIER",
+    "RANK_OFFSET",
     "ContrastiveBalance",
     "DetailedBalance",
     "FlowObjective",
     "ForwardLookingDetailedBalance",
     "GFlowNetObjective",
     "GFlowNetSampler",
+    "GeneticConfig",
+    "RankedBuffer",
     "SubTrajectoryBalance",
     "TrainingConfig",
     "TrainingResult",
@@ -43,6 +52,7 @@ __all__ = [
     "parameter_groups",
     "replay_trajectories",
     "sample_trajectories",
+    "train_genetic_gfn",
     "train_trajectory_balance",
     "trajectory_balance_loss",
 ]
