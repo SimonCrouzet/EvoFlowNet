@@ -29,7 +29,10 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from evoflownet.acquisition.rules import Greedy, TopK
+from evoflownet.algorithms.baselines.annealing import SimulatedAnnealing
+from evoflownet.algorithms.baselines.cmaes import CMAES
 from evoflownet.algorithms.baselines.genetic import GeneticAlgorithm
+from evoflownet.algorithms.baselines.mlde import MLDE
 from evoflownet.algorithms.baselines.mutagenesis import HillClimbing, RandomMutagenesis
 from evoflownet.algorithms.gflownet.genetic_gfn import GeneticConfig
 from evoflownet.algorithms.gflownet.objectives import ContrastiveBalance, TrajectoryBalance
@@ -262,6 +265,24 @@ def _genetic(env: MutationEnvironment, seed: int) -> Sampler:
     return GeneticAlgorithm(env, seed=seed)
 
 
+def _annealing(env: MutationEnvironment, seed: int) -> Sampler:
+    return SimulatedAnnealing(env, seed=seed)
+
+
+def _cmaes(env: MutationEnvironment, seed: int) -> Sampler:
+    return CMAES(env, seed=seed)
+
+
+def _mlde(env: MutationEnvironment, seed: int) -> Sampler:
+    """Machine-learning-directed evolution, the method protein engineers run.
+
+    The most important baseline here after the genetic algorithm: it is what
+    Wittmann et al. actually do, at almost exactly this budget, and its whole
+    claim is reaching the answer in hundreds of assays rather than thousands.
+    """
+    return MLDE(env, seed=seed)
+
+
 def _feasible_genetic(env: MutationEnvironment, seed: int) -> Sampler:
     """A genetic algorithm that rejection-samples until its offspring are legal.
 
@@ -281,6 +302,9 @@ BASELINES: dict[str, Methodology] = {
     "genetic": classical(_genetic),
     "genetic+proxy": classical(_genetic, proxy_access=True),
     "genetic-feasible": classical(_feasible_genetic, proxy_access=True),
+    "annealing": classical(_annealing, proxy_access=True),
+    "cmaes": classical(_cmaes, proxy_access=True),
+    "mlde": classical(_mlde, proxy_access=True),
 }
 
 #: GFlowNet objectives, each behind the same interface. Comparing them is a
