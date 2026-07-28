@@ -1,5 +1,0 @@
-main (main, 1 tasks x 100 seeds)
-  feasibility/random: 100 seeds cached
-  feasibility/random+surrogate: 100 seeds cached
-  feasibility/hill-climb: ran 99 (8.9s each), 1 cached
-  feasibility/genetic: ran 100 (7.5s each), 0 cached
