@@ -251,9 +251,19 @@ class Campaign:
         opening plate for a single measurement's worth of information.
         """
         size = min(self._batch_size, remaining)
+        fitted = False
         if index > 0 and self._surrogate is not None:
-            # In place, so any sampler holding this instance sees the update.
-            self._surrogate.fit(np.concatenate(measured), np.concatenate(values))
+            # A method can fail to produce a single buildable design in a whole
+            # round -- on a sparse feasible set an unmasked sampler routinely
+            # does. There is then nothing to fit, and that is a result about the
+            # method rather than an error: it proceeds unassisted and the ledger
+            # records a feasible fraction of zero. Raising here would turn the
+            # finding into a traceback and lose the rest of the campaign.
+            history = np.concatenate(values)
+            if np.isfinite(history).any():
+                # In place, so any sampler holding this instance sees the update.
+                self._surrogate.fit(np.concatenate(measured), history)
+                fitted = True
 
         pool = self._pool(index)
         proposed = pool.shape[0]
@@ -261,7 +271,7 @@ class Campaign:
             pool = self._unmeasured(pool, seen)
         screened = pool.shape[0]
         # Round 0 has no model to score with, so the pool order stands.
-        if screened == 0 or index == 0 or self._surrogate is None:
+        if screened == 0 or index == 0 or self._surrogate is None or not fitted:
             return proposed, screened, pool[:size], None
 
         mean, spread = self._surrogate.predict(pool)

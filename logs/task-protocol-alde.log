@@ -1,0 +1,7 @@
+main (main, 1 tasks x 100 seeds)
+  protocol-alde/random: ran 100 (0.3s each), 0 cached
+  protocol-alde/random+surrogate: ran 100 (5.6s each), 0 cached
+  protocol-alde/hill-climb: ran 100 (6.3s each), 0 cached
+  protocol-alde/genetic: ran 100 (5.4s each), 0 cached
+  protocol-alde/genetic+proxy: ran 100 (6.7s each), 0 cached
+  protocol-alde/genetic-feasible: ran 100 (11.0s each), 0 cached

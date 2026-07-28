@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -288,6 +288,36 @@ class ResultStore:
             The record, ready to append.
         """
         return RunRecord(source=dict(self._fingerprint), **fields)  # type: ignore[arg-type]
+
+    def bless(self, task: str, method: str) -> int:
+        """Restamp stored records with the current fingerprint.
+
+        For a change that provably cannot alter a completed run -- a new branch
+        reached only where the old code raised, say. Blessing such a change
+        keeps hours of valid compute that conservative invalidation would throw
+        away.
+
+        Use it only when that argument actually holds. It is the one operation
+        here that can make a table mix results from different code, which is the
+        failure the fingerprint exists to prevent.
+
+        Args:
+            task: Task name.
+            method: Methodology name.
+
+        Returns:
+            How many records were restamped.
+        """
+        held = self.load(task, method)
+        if not held:
+            return 0
+        path = self._path(task, method)
+        lines = [
+            json.dumps(asdict(replace(record, source=dict(self._fingerprint))))
+            for _, record in sorted(held.items())
+        ]
+        path.write_text("\n".join(lines) + "\n")
+        return len(lines)
 
     def tasks(self) -> list[str]:
         """Task names with stored results."""

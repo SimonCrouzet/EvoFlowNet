@@ -67,3 +67,4 @@ Thumbs.db
 .vscode/
 !.vscode/extensions.json
 results/
+logs/
