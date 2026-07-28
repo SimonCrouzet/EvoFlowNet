@@ -66,6 +66,12 @@ class SequencePolicy(nn.Module):
         n_layers: Number of hidden layers in the trunk. Must be at least 1.
         learn_backward: Whether to learn ``P_B``. When ``False`` the backward
             policy is uniform over the parents permitted by the backward mask.
+        seed: Seeds every parameter. ``None`` draws from global torch state,
+            which means two policies built from the same configuration differ
+            -- and in a paired benchmark that silently breaks the pairing the
+            statistics rest on, because "same seed" then no longer means "same
+            starting network". Measured: three runs of one configuration
+            returned 0.375, 0.375 and 0.25 before this existed.
         learn_flow: Whether to estimate a state flow ``log F(s)``. Needed by
             the detailed-balance family, which constrains flow through each
             *state*; trajectory balance constrains whole trajectories and does
@@ -86,6 +92,7 @@ class SequencePolicy(nn.Module):
         n_layers: int = 2,
         learn_backward: bool = False,
         learn_flow: bool = False,
+        seed: int | None = None,
     ) -> None:
         """Build the trunk and heads."""
         super().__init__()
@@ -104,6 +111,35 @@ class SequencePolicy(nn.Module):
         self._learn_backward = learn_backward
         self._learn_flow = learn_flow
 
+        # fork_rng isolates the draw: construction is reproducible without
+        # the side effect of reseeding global state for everything after it.
+        with torch.random.fork_rng(enabled=seed is not None):
+            if seed is not None:
+                torch.manual_seed(seed)
+            self._build_layers(
+                n_tokens=n_tokens,
+                sequence_length=sequence_length,
+                n_actions=n_actions,
+                embedding_dim=embedding_dim,
+                hidden_dim=hidden_dim,
+                n_layers=n_layers,
+                learn_backward=learn_backward,
+                learn_flow=learn_flow,
+            )
+
+    def _build_layers(  # noqa: PLR0913 - mirrors the constructor
+        self,
+        *,
+        n_tokens: int,
+        sequence_length: int,
+        n_actions: int,
+        embedding_dim: int,
+        hidden_dim: int,
+        n_layers: int,
+        learn_backward: bool,
+        learn_flow: bool,
+    ) -> None:
+        """Create the trunk and heads, under whatever RNG state the caller set."""
         self.embedding = nn.Embedding(n_tokens, embedding_dim)
 
         layers: list[nn.Module] = []

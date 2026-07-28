@@ -110,6 +110,9 @@ class RunRecord:
             L=256 costs minutes per seed and hours per arm. It is the
             round-to-round provenance the campaign already computes and would
             otherwise discard at this boundary.
+        deterministic: Whether threading was pinned when this ran. A record
+            made under multithreaded reduction cannot be reproduced, so it
+            carries that fact rather than leaving a later reader to infer it.
         proxy_calls: Reward evaluations spent on the surrogate. Free against
             the oracle budget, not against wall clock, and reported so the
             trade is visible rather than implied.
@@ -132,6 +135,7 @@ class RunRecord:
     trace: list[float] = field(default_factory=list)
     rounds: list[dict[str, float]] = field(default_factory=list)
     proxy_calls: int = 0
+    deterministic: bool = True
     top_sequences: list[list[int]] = field(default_factory=list)
     source: dict[str, str] = field(default_factory=dict)
 

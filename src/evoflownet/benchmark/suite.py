@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from evoflownet.benchmark.determinism import is_deterministic
 from evoflownet.benchmark.protocol import PLATE, Protocol, round_sweep
 from evoflownet.benchmark.tasks import Task
 from evoflownet.landscapes.ehrlich import EhrlichLandscape
@@ -295,6 +296,7 @@ def run_task(
                     oracle_calls=result.oracle_calls,
                     proposals=result.proposals,
                     proxy_calls=int(getattr(method_sampler, "proxy_calls", 0)),
+                    deterministic=is_deterministic(),
                     top_sequences=_top_designs(result),
                     trace=result.trace(),
                     rounds=[
