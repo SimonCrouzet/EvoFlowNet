@@ -273,6 +273,23 @@ class EhrlichLandscape(FitnessLandscape):
         quantised: npt.NDArray[np.float64] = (best // step) / self._quantization
         return quantised
 
+    def feasible_sequence(self, seed: int = 0) -> Tokens:
+        """Draw a feasible sequence, for use as a campaign's starting point.
+
+        A directed-evolution campaign starts from a wild type, and on this
+        landscape that must be a sequence the DMP admits -- an infeasible parent
+        would score minus infinity and give a mutation-based sampler nothing to
+        climb from. The draw is independent of the planted optimum, so it leaks
+        no information about the answer.
+
+        Args:
+            seed: Seeds the walk.
+
+        Returns:
+            A feasible sequence of the landscape's length.
+        """
+        return self._sample_feasible(np.random.default_rng(seed))
+
     def _sample_feasible(self, rng: np.random.Generator) -> Tokens:
         """Draw a feasible sequence by walking the Markov chain."""
         sequence = np.empty(self._sequence_length, dtype=np.int32)
