@@ -1,0 +1,26 @@
+budget-gradient (diagnostic, 4 tasks x 50 seeds)
+  budget-96/random: ran 50 (0.9s each), 0 cached
+Traceback (most recent call last):
+  File "/mnt/d/Programmation/GFlowsNets DirectedEvolution/experiments/run_suite.py", line 168, in <module>
+    return 2
+
+  File "/mnt/d/Programmation/GFlowsNets DirectedEvolution/experiments/run_suite.py", line 154, in main
+    if args.task:
+
+  File "/mnt/d/Programmation/GFlowsNets DirectedEvolution/src/evoflownet/benchmark/suite.py", line 346, in run_tier
+    return sum(run_task(task, methods, store, tier.seeds, report=report) for task in tier.tasks)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/d/Programmation/GFlowsNets DirectedEvolution/src/evoflownet/benchmark/suite.py", line 346, in <genexpr>
+    return sum(run_task(task, methods, store, tier.seeds, report=report) for task in tier.tasks)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/d/Programmation/GFlowsNets DirectedEvolution/src/evoflownet/benchmark/suite.py", line 276, in run_task
+    result = campaign.run()
+             ^^^^^^^^^^^^^^
+  File "/mnt/d/Programmation/GFlowsNets DirectedEvolution/src/evoflownet/loop/campaign.py", line 183, in run
+    proposed, screened, batch, predicted = self._design(
+                                           ^^^^^^^^^^^^^
+  File "/mnt/d/Programmation/GFlowsNets DirectedEvolution/src/evoflownet/loop/campaign.py", line 256, in _design
+    self._surrogate.fit(np.concatenate(measured), np.concatenate(values))
+  File "/mnt/d/Programmation/GFlowsNets DirectedEvolution/src/evoflownet/surrogate/ensemble.py", line 152, in fit
+    raise ValueError("cannot fit a surrogate when no observation is finite")
+ValueError: cannot fit a surrogate when no observation is finite

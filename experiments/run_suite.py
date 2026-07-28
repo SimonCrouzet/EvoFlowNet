@@ -132,6 +132,13 @@ def main(argv: list[str] | None = None) -> int:
     """Run or report on the suite."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tier", action="append", help="Run only these tiers.")
+    parser.add_argument(
+        "--task",
+        action="append",
+        help="Run only these tasks. Sharding by task is race-free -- the store "
+        "keeps one file per task and method -- so a process per task uses the "
+        "cores far better than threads do, most of the work being serial Python.",
+    )
     parser.add_argument("--seeds", type=int, default=MAIN_SEEDS, help="Seeds for main tiers.")
     parser.add_argument(
         "--diagnostic-seeds", type=int, default=DIAGNOSTIC_SEEDS, help="Seeds for diagnostics."
@@ -144,9 +151,21 @@ def main(argv: list[str] | None = None) -> int:
     selected = tiers(args.seeds, args.diagnostic_seeds)
     if args.tier:
         selected = [t for t in selected if t.name in set(args.tier)]
-        if not selected:
-            print(f"no tier matched {args.tier}", file=sys.stderr)
-            return 2
+    if args.task:
+        wanted = set(args.task)
+        selected = [
+            Tier(
+                t.name,
+                tuple(task for task in t.tasks if task.name in wanted),
+                t.seeds,
+                t.headline,
+            )
+            for t in selected
+        ]
+        selected = [t for t in selected if t.tasks]
+    if not selected:
+        print(f"nothing matched tier={args.tier} task={args.task}", file=sys.stderr)
+        return 2
 
     started = time.perf_counter()
     for tier in selected:

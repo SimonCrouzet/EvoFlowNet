@@ -1,0 +1,74 @@
+large-space (main, 1 tasks x 30 seeds)
+  large-space/random: 30 seeds cached
+  large-space/random+surrogate: 30 seeds cached
+  large-space/hill-climb: 30 seeds cached
+  large-space/genetic: 30 seeds cached
+  large-space/genetic+proxy: 30 seeds cached
+  large-space/genetic-feasible: 30 seeds cached
+  large-space/gfn-tb: 30 seeds cached
+  large-space/gfn-contrastive: 30 seeds cached
+large-space: ran 0 campaigns
+
+large-space  [four plates: 4x96=384]
+  random             regret   0.992 +/- 0.000  feas 0.074  div  5.01  spent    384  n=30
+  random+surrogate   regret   0.991 +/- 0.000  feas 0.048  div  5.81  spent    384  n=30
+  hill-climb         regret   0.989 +/- 0.001  feas 0.234  div  2.46  spent    384  n=30
+  genetic            regret   0.991 +/- 0.001  feas 0.106  div  5.17  spent    384  n=30
+  genetic+proxy      regret   0.992 +/- 0.000  feas 0.073  div  4.29  spent    384  n=30
+  genetic-feasible   regret   0.980 +/- 0.002  feas 1.000  div  4.42  spent    384  n=30
+  gfn-tb             regret   0.974 +/- 0.001  feas 1.000  div  7.79  spent    384  n=30
+  gfn-contrastive    regret   0.977 +/- 0.002  feas 1.000  div  7.75  spent    384  n=30
+  paired vs genetic+proxy (positive favours the first):
+    random: +0.000 [-0.001, +0.001]  t=0.00  wins 1/30
+    random+surrogate: +0.001 [-0.000, +0.002]  t=1.36  wins 4/30
+        inconclusive; ~128 seeds would resolve this
+    hill-climb: +0.003 [+0.001, +0.005]* t=3.89  wins 13/30
+    genetic: +0.001 [+0.000, +0.002]* t=2.11  wins 4/30
+    genetic-feasible: +0.011 [+0.008, +0.015]* t=7.26  wins 25/30
+    gfn-tb: +0.017 [+0.015, +0.020]* t=12.59  wins 30/30
+    gfn-contrastive: +0.015 [+0.011, +0.018]* t=9.25  wins 28/30
+
+total 1s
+store: results
+  budget-96/random: 50 seeds
+  budget-96/random+surrogate: 33 seeds
+  feasibility/hill-climb: 1 seeds
+  feasibility/random: 100 seeds
+  feasibility/random+surrogate: 100 seeds
+  gb1-anchor/genetic: 100 seeds
+  gb1-anchor/genetic+proxy: 100 seeds
+  gb1-anchor/genetic-feasible: 100 seeds
+  gb1-anchor/gfn-contrastive: 100 seeds
+  gb1-anchor/gfn-tb: 100 seeds
+  gb1-anchor/hill-climb: 100 seeds
+  gb1-anchor/random: 100 seeds
+  gb1-anchor/random+surrogate: 100 seeds
+  large-space/genetic: 30 seeds
+  large-space/genetic+proxy: 30 seeds
+  large-space/genetic-feasible: 30 seeds
+  large-space/gfn-contrastive: 30 seeds
+  large-space/gfn-tb: 30 seeds
+  large-space/hill-climb: 30 seeds
+  large-space/random: 30 seeds
+  large-space/random+surrogate: 30 seeds
+  objectives/gfn-contrastive: 50 seeds
+  objectives/gfn-db: 50 seeds
+  objectives/gfn-fldb: 50 seeds
+  objectives/gfn-subtb: 50 seeds
+  objectives/gfn-tb: 50 seeds
+  rounds-4x96/genetic: 50 seeds
+  rounds-4x96/genetic+proxy: 50 seeds
+  rounds-4x96/genetic-feasible: 50 seeds
+  rounds-4x96/gfn-contrastive: 50 seeds
+  rounds-4x96/gfn-tb: 50 seeds
+  rounds-4x96/hill-climb: 50 seeds
+  rounds-4x96/random: 50 seeds
+  rounds-4x96/random+surrogate: 50 seeds
+  rounds-8x48/genetic: 50 seeds
+  rounds-8x48/genetic+proxy: 50 seeds
+  rounds-8x48/genetic-feasible: 50 seeds
+  rounds-8x48/gfn-contrastive: 50 seeds
+  rounds-8x48/gfn-tb: 50 seeds
+  rounds-8x48/hill-climb: 50 seeds
+  rounds-8x48/random: 50 seeds
+  rounds-8x48/random+surrogate: 50 seeds
