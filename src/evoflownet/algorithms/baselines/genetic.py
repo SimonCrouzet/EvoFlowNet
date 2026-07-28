@@ -54,7 +54,11 @@ class GeneticAlgorithm(Sampler):
         recombine_prob: Per-position probability of taking the other parent's
             token during crossover. Defaults to ``1/L``.
         survival_quantile: Fraction of the population retained as parents each
-            generation. holo-bench uses 0.01.
+            generation. The default of 0.25 is our choice, not a published
+            value -- holo-bench uses 0.01, which at our population sizes leaves
+            too few parents to recombine. Stated because the argument beside it
+            *does* carry its authors' value, and a reader is entitled to know
+            which is which.
         feasible_only: Resample offspring until constructible. The control for
             the feasibility claim; see the module docstring.
         max_attempts: Resampling rounds before giving up when
@@ -188,7 +192,14 @@ class GeneticAlgorithm(Sampler):
         offspring = np.where(take_second, second, first)
 
         mutate = self._rng.random((n, length)) < self._mutation_prob
-        replacements = self._rng.integers(0, size, size=(n, length))
+        # Draw from the other tokens rather than from all of them. Sampling
+        # uniformly over the whole alphabet redraws the token already present
+        # one time in V, so the realised substitution rate would be
+        # p_m * (V - 1) / V -- a 5% shortfall at the protein alphabet, which
+        # would mean running Stanton et al.'s hyperparameters at 95% of their
+        # published value while reporting them as the published value.
+        drawn = self._rng.integers(0, size - 1, size=(n, length))
+        replacements = drawn + (drawn >= offspring)
         offspring = np.where(mutate, replacements, offspring)
 
         # The environment admits at most max_mutations differences from the
