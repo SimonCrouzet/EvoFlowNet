@@ -3,3 +3,4 @@ main (main, 1 tasks x 100 seeds)
   protocol-evolvepro/random+surrogate: ran 100 (17.8s each), 0 cached
   protocol-evolvepro/hill-climb: ran 100 (20.4s each), 0 cached
   protocol-evolvepro/genetic: ran 100 (16.8s each), 0 cached
+  protocol-evolvepro/genetic+proxy: ran 100 (23.6s each), 0 cached

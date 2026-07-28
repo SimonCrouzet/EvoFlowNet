@@ -1,0 +1,2 @@
+# Expected improvement over the incumbent. No free weight, unlike UCB.
+_target_: evoflownet.acquisition.rules.ExpectedImprovement

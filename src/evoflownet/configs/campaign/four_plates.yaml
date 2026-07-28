@@ -1,0 +1,8 @@
+# Four rounds of 96: 384 assays. Not a convenient round number -- ALDE
+# screened 396 as six 96-well plates over three rounds, and LaMBO-2's wet lab
+# measured 374. The 1,000-10,000 common in iterative ML benchmarks sits above
+# even classical directed evolution.
+rounds: 4
+batch_size: 96
+pool_size: 2048
+skip_measured: true

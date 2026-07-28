@@ -1,0 +1,3 @@
+# The conventional choice, and the one that returns a near-duplicate batch
+# when the surrogate has a single peak.
+_target_: evoflownet.acquisition.rules.TopK

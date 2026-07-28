@@ -3,3 +3,4 @@ budget-gradient (diagnostic, 1 tasks x 50 seeds)
   budget-10000/random+surrogate: ran 50 (39.9s each), 0 cached
   budget-10000/hill-climb: ran 50 (9.1s each), 0 cached
   budget-10000/genetic: ran 50 (76.4s each), 0 cached
+  budget-10000/genetic+proxy: ran 50 (52.2s each), 0 cached

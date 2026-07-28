@@ -1,0 +1,3 @@
+# Take the predicted value and ignore uncertainty. Harder to beat than it
+# looks -- two published nulls report it winning.
+_target_: evoflownet.acquisition.rules.Greedy
