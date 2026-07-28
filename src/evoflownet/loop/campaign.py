@@ -52,10 +52,13 @@ import numpy as np
 
 from evoflownet.acquisition.rules import Greedy, TopK
 from evoflownet.loop.ledger import CampaignResult, RoundRecord
+from evoflownet.loop.provenance import write_manifest, write_round
 from evoflownet.metrics.diversity import diversity
 from evoflownet.tracking.base import NoOpTracker
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     import numpy.typing as npt
 
     from evoflownet.acquisition.base import Acquisition, BatchSelector
@@ -105,6 +108,11 @@ class Campaign:
             that says how much of a method's apparent efficiency is the
             screening rather than the method.
         tracker: Where per-round metrics go.
+        artifact_dir: Where to write each round's batch, as a chained artifact.
+            ``None`` writes nothing, which is right for a benchmark sweep where
+            the aggregate is the product. A campaign wants the opposite -- the
+            designs that went to the lab in round three and what came back --
+            and that is what this records.
 
     Raises:
         ValueError: If any size is not positive, or the pool is smaller than
@@ -125,6 +133,7 @@ class Campaign:
         initial_design: Tokens | None = None,
         skip_measured: bool = True,
         tracker: Tracker | None = None,
+        artifact_dir: Path | None = None,
     ) -> None:
         """Configure the campaign without running it."""
         for name, value in [
@@ -151,6 +160,7 @@ class Campaign:
         self._initial_design = initial_design
         self._skip_measured = skip_measured
         self._tracker = tracker or NoOpTracker()
+        self._artifact_dir = artifact_dir
 
     @property
     def budget(self) -> int:
@@ -205,6 +215,15 @@ class Campaign:
                 previous_best=best_so_far,
                 predicted=predicted,
             )
+            if self._artifact_dir is not None:
+                write_round(
+                    self._artifact_dir,
+                    record=record,
+                    sequences=batch,
+                    values=scores,
+                    predicted=predicted,
+                    tracker=self._tracker,
+                )
             best_so_far = record.best_so_far
             records.append(record)
             self._tracker.log_metrics(
@@ -217,6 +236,9 @@ class Campaign:
                 },
                 step=index,
             )
+
+        if self._artifact_dir is not None and records:
+            write_manifest(self._artifact_dir, tuple(records))
 
         optimum = self._landscape.optimum
         return CampaignResult(
