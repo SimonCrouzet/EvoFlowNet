@@ -185,6 +185,7 @@ def gflownet(
             n_tokens=env.alphabet.size,
             hidden_dim=128,
             learn_flow=learn_flow,
+            seed=seed,
         )
         proxy = ProxyLandscape(ensemble, alphabet=env.alphabet, sequence_length=env.sequence_length)
         sampler = GFlowNetSampler(
@@ -230,6 +231,7 @@ def genetic_gflownet(
             sequence_length=env.sequence_length,
             n_tokens=env.alphabet.size,
             hidden_dim=128,
+            seed=seed,
         )
         proxy = ProxyLandscape(ensemble, alphabet=env.alphabet, sequence_length=env.sequence_length)
         sampler = GFlowNetSampler(

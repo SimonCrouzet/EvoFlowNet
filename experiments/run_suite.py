@@ -19,6 +19,7 @@ import sys
 import time
 from pathlib import Path
 
+from evoflownet.benchmark.determinism import configure_determinism, is_deterministic
 from evoflownet.benchmark.methods import BASELINES, OBJECTIVES, flow_objectives
 from evoflownet.benchmark.statistics import compare, seeds_needed
 from evoflownet.benchmark.store import ResultStore
@@ -146,6 +147,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--results", default="results", help="Where to store results.")
     parser.add_argument("--report", action="store_true", help="Report without running.")
     args = parser.parse_args(argv)
+
+    # Before any tensor work: a multithreaded matmul sums in thread-completion
+    # order, and a few hundred gradient steps turn that into a different design.
+    configure_determinism()
+    if not args.report and not is_deterministic():
+        print("refusing to run: threading is not pinned", file=sys.stderr)
+        return 3
 
     store = ResultStore(Path(args.results))
     selected = tiers(args.seeds, args.diagnostic_seeds)

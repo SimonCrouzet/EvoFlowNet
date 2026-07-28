@@ -26,6 +26,16 @@ sequences at different rates, put the budget outside.
 
 Neither is a default, because choosing silently would change what a reported
 budget means.
+
+**Two noise models, and they are not interchangeable.** :class:`Noisy` adds
+homoscedastic Gaussian noise: the same uncertainty everywhere, so a sampler that
+climbs to the top of the landscape finds the measurements there exactly as
+trustworthy as the ones at the bottom. Real selection assays do not behave that
+way, and :class:`SelectionNoisy` is the wrapper that reproduces what they
+actually do -- see its docstring for the finding it exists to model. Use
+:class:`Noisy` when you want a controlled, analytically simple perturbation; use
+:class:`SelectionNoisy` when the claim being made is about robustness to *assay*
+noise.
 """
 
 from __future__ import annotations
@@ -174,6 +184,256 @@ class Noisy(LandscapeWrapper):
         if self._clip_to_optimum and optimum is not None:
             values = np.minimum(values, optimum[None, :])
         return values
+
+
+class SelectionNoisy(LandscapeWrapper):
+    r"""Simulates a pooled selection assay read out by sequencing.
+
+    **The finding this exists to reproduce.** Sundar, Tu, Guan and Esvelt
+    (*FLIGHTED*, bioRxiv 2024; code MIT,
+    https://github.com/vikram-sundar/FLIGHTED_public) fitted a generative noise
+    model to the GB1 mRNA-display data and report that *"the highest-performing
+    variants in a given single-step selection experiment show essentially 0
+    correlation between measured and true fitness"* -- Pearson r ≈ 0 for the
+    ~1,000 highest-enrichment variants. **The top of the measured landscape,
+    precisely where a sampler concentrates, is where the measurement carries the
+    least information.** :class:`Noisy` cannot produce this at any ``scale``: its
+    error is the same size everywhere, so the correlation it leaves behind is
+    flat across the fitness range.
+
+    **Why the real assay does it.** The pathology is not additive noise. A
+    pooled selection measures fitness only through a survival probability, and
+    that probability saturates: once a variant survives 99% of the time, making
+    it twice as good moves its read count almost not at all. Measured enrichment
+    is then dominated by counting noise, and inverting the saturating link
+    amplifies that noise without bound. So the model here is the mechanism, not
+    a variance function bolted onto a Gaussian:
+
+    .. math::
+
+        p_i          &= \sigma(s \cdot (f_i - m)) \\
+        \lambda_i    &\sim \mathrm{Gamma}(k,\ \bar{n}/k) \\
+        n^{0}_i      &\sim \mathrm{Poisson}(\lambda_i) \\
+        n^{1}_i      &\sim \mathrm{Binomial}(n^{0}_i,\ p_i) \\
+        \hat{f}_i    &= m + \sigma^{-1}\!\left(\tfrac{n^{1}_i + 1/2}{n^{0}_i + 1}\right) / s
+
+    The Gamma-Poisson draw is a negative binomial: library preparation does not
+    deposit every variant at equal abundance, and ``dispersion`` is the
+    over-dispersion relative to pure Poisson counting that DMS pipelines
+    (DiMSum, Rosette/Rosace) fit from data. The binomial step is FLIGHTED's
+    single-step selection. The final line inverts the forward model, so with
+    unlimited reads the measurement is *exact* -- all of the error, and all of
+    its fitness-dependence, comes from finite counts.
+
+    The ``+1/2`` and ``+1`` are the Haldane-Anscombe correction. Without them a
+    variant that lost every read would measure ``-inf``, and one that lost none
+    would measure ``+inf``, which is an artefact of the estimator rather than of
+    the assay.
+
+    Note:
+        Unlike :class:`Noisy`, this wrapper is not centred on the truth: the
+        inverse link is convex at the top of the range, so measurements of the
+        best variants are biased upward. That bias is a property of real
+        enrichment assays and is deliberately not corrected.
+
+    Note:
+        :class:`Cached` rejects :class:`Noisy` but does not reject this class.
+        Caching it has the same effect -- the first measurement of each sequence
+        is frozen forever -- and is very probably a mistake.
+
+    Args:
+        landscape: The landscape to wrap.
+        midpoint: Fitness at which a variant survives selection half the time.
+            Measurements are most informative here and least informative far
+            above it.
+        slope: How sharply survival rises with fitness. Larger values saturate
+            sooner, so the uninformative region starts lower.
+        reads: Mean sequencing depth per variant before selection. This is the
+            single knob that sets how noisy the assay is overall.
+        dispersion: Shape of the Gamma-Poisson library abundance. Small values
+            mean a badly skewed library; large values approach pure Poisson
+            counting.
+        seed: Seed for the assay's random stream.
+
+    Raises:
+        ValueError: If ``slope``, ``reads`` or ``dispersion`` is not positive.
+
+    Example:
+        Calibrate against the landscape's own range rather than guessing::
+
+            >>> from evoflownet.landscapes import EhrlichLandscape
+            >>> truth = EhrlichLandscape(seed=0)
+            >>> assay = SelectionNoisy.calibrated(truth, top_fitness=1.0, seed=1)
+    """
+
+    def __init__(  # noqa: PLR0913 - an assay is defined by its selection and its depth
+        self,
+        landscape: FitnessLandscape,
+        *,
+        midpoint: float = 0.0,
+        slope: float = 1.0,
+        reads: float = 100.0,
+        dispersion: float = 3.0,
+        seed: int = 0,
+    ) -> None:
+        """Wrap a landscape with count-based selection noise."""
+        super().__init__(landscape)
+        if slope <= 0:
+            raise ValueError(f"slope must be positive so fitness raises survival, got {slope}")
+        if reads <= 0:
+            raise ValueError(f"reads must be positive, got {reads}")
+        if dispersion <= 0:
+            raise ValueError(f"dispersion must be positive, got {dispersion}")
+        self._midpoint = midpoint
+        self._slope = slope
+        self._reads = reads
+        self._dispersion = dispersion
+        self._rng = np.random.default_rng(seed)
+
+    @classmethod
+    def calibrated(  # noqa: PLR0913 - mirrors the constructor, in fitness units
+        cls,
+        landscape: FitnessLandscape,
+        *,
+        neutral_fitness: float = 0.0,
+        top_fitness: float | None = None,
+        top_survival: float = 0.995,
+        reads: float = 100.0,
+        dispersion: float = 3.0,
+        seed: int = 0,
+    ) -> SelectionNoisy:
+        """Build a wrapper whose saturation is placed against a landscape's range.
+
+        ``midpoint`` and ``slope`` are in the units of whatever the landscape
+        returns, so a default pair is meaningful for one landscape and absurd for
+        the next -- and getting them wrong is silent: the assay just stops
+        saturating, and the FLIGHTED signature disappears. This picks them from
+        two fitness values instead, which is the calibration a real experiment
+        does when it chooses selection stringency.
+
+        Args:
+            landscape: The landscape to wrap.
+            neutral_fitness: Fitness that survives selection half the time.
+                Usually wild-type, which is 1.0 on the GB1 and TrpB scales and
+                0.0 on a log-enrichment scale.
+            top_fitness: Fitness placed at ``top_survival``. Defaults to the
+                landscape's known optimum.
+            top_survival: Survival probability assigned to ``top_fitness``.
+                Closer to 1 means a more stringent selection and a wider
+                uninformative region at the top.
+            reads: Mean sequencing depth per variant before selection.
+            dispersion: Shape of the Gamma-Poisson library abundance.
+            seed: Seed for the assay's random stream.
+
+        Returns:
+            A wrapper saturating across the requested range.
+
+        Raises:
+            ValueError: If ``top_survival`` is not in ``(0.5, 1)``, if
+                ``top_fitness`` does not exceed ``neutral_fitness``, or if
+                ``top_fitness`` is omitted and the landscape does not know its
+                optimum.
+        """
+        if not 0.5 < top_survival < 1.0:  # noqa: PLR2004 - 0.5 is the midpoint by definition
+            raise ValueError(
+                f"top_survival must lie in (0.5, 1) so the top of the range sits above "
+                f"the midpoint, got {top_survival}"
+            )
+        if top_fitness is None:
+            optimum = landscape.optimum
+            if optimum is None:
+                raise ValueError(
+                    f"{type(landscape).__name__} does not know its optimum, so top_fitness "
+                    f"cannot be inferred; pass it explicitly"
+                )
+            top_fitness = float(np.max(optimum))
+        if top_fitness <= neutral_fitness:
+            raise ValueError(
+                f"top_fitness must exceed neutral_fitness, got {top_fitness} <= {neutral_fitness}"
+            )
+        slope = float(np.log(top_survival / (1.0 - top_survival)) / (top_fitness - neutral_fitness))
+        return cls(
+            landscape,
+            midpoint=neutral_fitness,
+            slope=slope,
+            reads=reads,
+            dispersion=dispersion,
+            seed=seed,
+        )
+
+    @property
+    def midpoint(self) -> float:
+        """Fitness at which a variant survives selection half the time."""
+        return self._midpoint
+
+    @property
+    def slope(self) -> float:
+        """How sharply survival rises with fitness."""
+        return self._slope
+
+    @property
+    def reads(self) -> float:
+        """Mean sequencing depth per variant before selection."""
+        return self._reads
+
+    @property
+    def dispersion(self) -> float:
+        """Shape of the Gamma-Poisson library abundance."""
+        return self._dispersion
+
+    def survival_probability(self, fitness: Fitness) -> npt.NDArray[np.float64]:
+        """Probability that a variant of each fitness survives selection.
+
+        Exposed because it is the diagnostic that says whether this wrapper is
+        calibrated: if nothing in the landscape reaches a probability near 1,
+        nothing saturates and the assay is merely noisy rather than
+        uninformative at the top.
+
+        Args:
+            fitness: Objective values, of any shape.
+
+        Returns:
+            Survival probabilities of the same shape.
+        """
+        return _sigmoid(self._slope * (np.asarray(fitness, dtype=np.float64) - self._midpoint))
+
+    def _evaluate(self, sequences: Tokens) -> Fitness:
+        """Run the batch through one simulated selection and sequencing round."""
+        values = np.asarray(self._inner.evaluate(sequences), dtype=np.float64).copy()
+        # Leave -inf alone, as Noisy does: an infeasible sequence is not a noisy
+        # measurement of a feasible one.
+        finite = np.isfinite(values)
+        truth = values[finite]
+
+        probability = self.survival_probability(truth)
+        abundance = self._rng.gamma(self._dispersion, self._reads / self._dispersion, truth.shape)
+        initial = self._rng.poisson(abundance)
+        surviving = self._rng.binomial(initial, probability)
+
+        observed = (surviving + 0.5) / (initial + 1.0)
+        values[finite] = self._midpoint + np.log(observed / (1.0 - observed)) / self._slope
+        return values
+
+
+def _sigmoid(x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    """Logistic function, evaluated without overflowing on large magnitudes.
+
+    Args:
+        x: Any real values.
+
+    Returns:
+        Values in ``(0, 1)``, of the same shape.
+    """
+    # exp(-x) overflows for very negative x and exp(x) for very positive x, so
+    # each half of the domain uses the branch that only ever exponentiates a
+    # non-positive number. Tests run with warnings as errors, so an overflow
+    # here would be a failure rather than a silently wrong number.
+    out = np.empty_like(x, dtype=np.float64)
+    positive = x >= 0
+    out[positive] = 1.0 / (1.0 + np.exp(-x[positive]))
+    lower = np.exp(x[~positive])
+    out[~positive] = lower / (1.0 + lower)
+    return out
 
 
 class Budgeted(LandscapeWrapper):

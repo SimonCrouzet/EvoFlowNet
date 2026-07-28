@@ -3,7 +3,14 @@
 from evoflownet.landscapes.base import MAX_ENUMERABLE_SIZE, FitnessLandscape
 from evoflownet.landscapes.ehrlich import EhrlichLandscape
 from evoflownet.landscapes.gb1 import GB1Landscape
-from evoflownet.landscapes.wrappers import Budgeted, BudgetExhaustedError, Cached, Noisy
+from evoflownet.landscapes.trpb import TrpBLandscape
+from evoflownet.landscapes.wrappers import (
+    Budgeted,
+    BudgetExhaustedError,
+    Cached,
+    Noisy,
+    SelectionNoisy,
+)
 
 __all__ = [
     "MAX_ENUMERABLE_SIZE",
@@ -14,4 +21,6 @@ __all__ = [
     "FitnessLandscape",
     "GB1Landscape",
     "Noisy",
+    "SelectionNoisy",
+    "TrpBLandscape",
 ]
