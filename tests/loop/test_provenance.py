@@ -17,6 +17,7 @@ from evoflownet.landscapes.base import FitnessLandscape
 from evoflownet.loop import Campaign
 from evoflownet.loop.provenance import FIELDS
 from evoflownet.surrogate import DeepEnsemble
+from evoflownet.tracking.base import Tracker
 
 ALPHABET = Alphabet.from_string("ACGT")
 LENGTH = 5
@@ -141,7 +142,7 @@ class TestManifest:
 
 class TestTrackerRegistration:
     def test_each_round_is_registered(self, tmp_path):
-        class Recording:
+        class Recording(Tracker):
             def __init__(self):
                 self.names = []
 
@@ -151,7 +152,7 @@ class TestTrackerRegistration:
             def log_metrics(self, metrics, *, step):
                 pass
 
-            def log_artifact(self, path, *, name):
+            def log_artifact(self, path, *, name):  # noqa: ARG002 - records the name only
                 self.names.append(name)
 
         tracker = Recording()
