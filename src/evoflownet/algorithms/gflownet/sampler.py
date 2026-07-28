@@ -39,10 +39,13 @@ import numpy as np
 import torch
 
 from evoflownet.algorithms.base import Sampler
+from evoflownet.algorithms.gflownet.genetic_gfn import train_genetic_gfn
 from evoflownet.algorithms.gflownet.sampling import sample_trajectories
 from evoflownet.algorithms.gflownet.training import TrainingConfig, train_trajectory_balance
 
 if TYPE_CHECKING:
+    from evoflownet.algorithms.baselines.genetic import GeneticAlgorithm
+    from evoflownet.algorithms.gflownet.genetic_gfn import GeneticConfig
     from evoflownet.algorithms.gflownet.objectives import GFlowNetObjective
     from evoflownet.core.types import Tokens
     from evoflownet.env.base import SequenceEnvironment
@@ -63,6 +66,13 @@ class GFlowNetSampler(Sampler):
         config: Training settings applied on every retrain.
         objective: How balance violation is measured. Defaults to trajectory
             balance.
+        genetic: A genetic algorithm to use as the policy's teacher. With one,
+            training runs through :func:`train_genetic_gfn` -- the GA
+            recombines the best of a rank-based buffer and its offspring are
+            replayed into the training batch. Kim et al. report this closing a
+            58% deficit against Mol GA on PMO, and directed evolution *is* a
+            genetic algorithm, so it is the variant most likely to matter here.
+        genetic_config: How much guidance to apply. Ignored without ``genetic``.
         seed: Seeds proposal sampling, independently of training.
     """
 
@@ -75,6 +85,8 @@ class GFlowNetSampler(Sampler):
         reward: Reward,
         config: TrainingConfig | None = None,
         objective: GFlowNetObjective | None = None,
+        genetic: GeneticAlgorithm | None = None,
+        genetic_config: GeneticConfig | None = None,
         seed: int = 0,
     ) -> None:
         """Store the training setup without running it."""
@@ -85,6 +97,8 @@ class GFlowNetSampler(Sampler):
         self._reward = reward
         self._config = config or TrainingConfig()
         self._objective = objective
+        self._genetic = genetic
+        self._genetic_config = genetic_config
         self._generator: torch.Generator | None = None
         self._seed = seed
         self._rounds_trained = 0
@@ -94,7 +108,8 @@ class GFlowNetSampler(Sampler):
     def name(self) -> str:
         """Short label naming the objective the policy was trained under."""
         objective = type(self._objective).__name__ if self._objective else "TrajectoryBalance"
-        return f"GFlowNet ({objective})"
+        teacher = " + GA" if self._genetic is not None else ""
+        return f"GFlowNet ({objective}){teacher}"
 
     @property
     def rounds_trained(self) -> int:
@@ -121,16 +136,29 @@ class GFlowNetSampler(Sampler):
             An ``(n, sequence_length)`` array of terminal states.
         """
         if self._proxy.is_ready:
-            result = train_trajectory_balance(
-                self._env,
-                self._policy,
-                self._proxy,
-                self._reward,
-                # A distinct seed per round, or every round would replay the
-                # same trajectories and the later rounds would teach nothing.
-                replace(self._config, seed=self._config.seed + self._rounds_trained),
-                objective=self._objective,
-            )
+            # A distinct seed per round, or every round replays the same
+            # trajectories and the later rounds teach nothing.
+            config = replace(self._config, seed=self._config.seed + self._rounds_trained)
+            if self._genetic is not None:
+                result = train_genetic_gfn(
+                    self._env,
+                    self._policy,
+                    self._proxy,
+                    self._reward,
+                    config,
+                    genetic=self._genetic,
+                    genetic_config=self._genetic_config,
+                    objective=self._objective,
+                )
+            else:
+                result = train_trajectory_balance(
+                    self._env,
+                    self._policy,
+                    self._proxy,
+                    self._reward,
+                    config,
+                    objective=self._objective,
+                )
             self._proxy_calls += result.oracle_calls
             self._rounds_trained += 1
 

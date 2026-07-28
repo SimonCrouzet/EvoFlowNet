@@ -31,6 +31,7 @@ import numpy as np
 from evoflownet.acquisition.rules import Greedy, TopK
 from evoflownet.algorithms.baselines.genetic import GeneticAlgorithm
 from evoflownet.algorithms.baselines.mutagenesis import HillClimbing, RandomMutagenesis
+from evoflownet.algorithms.gflownet.genetic_gfn import GeneticConfig
 from evoflownet.algorithms.gflownet.objectives import ContrastiveBalance, TrajectoryBalance
 from evoflownet.algorithms.gflownet.sampler import GFlowNetSampler
 from evoflownet.algorithms.gflownet.training import TrainingConfig
@@ -200,6 +201,53 @@ def gflownet(
     return methodology
 
 
+def genetic_gflownet(
+    objective: GFlowNetObjective | None = None,
+    *,
+    steps: int = DEFAULT_TRAINING_STEPS,
+    beta: float = DEFAULT_BETA,
+) -> Methodology:
+    """A GFlowNet taught by a genetic algorithm, after Kim et al. (2024).
+
+    The variant most likely to matter here: directed evolution is a genetic
+    algorithm, the Ehrlich benchmark's own baseline is one, and a vanilla
+    GFlowNet trails Mol GA by 58% on PMO. Genetic-GFN closes that by absorbing
+    the GA rather than competing with it.
+
+    Args:
+        objective: How balance violation is measured.
+        steps: Gradient steps per round.
+        beta: Reward exponent.
+
+    Returns:
+        A methodology.
+    """
+
+    def methodology(task: Task, seed: int) -> Campaign:
+        landscape, env, ensemble = _parts(task, seed)
+        policy = SequencePolicy(
+            n_actions=env.n_actions,
+            sequence_length=env.sequence_length,
+            n_tokens=env.alphabet.size,
+            hidden_dim=128,
+        )
+        proxy = ProxyLandscape(ensemble, alphabet=env.alphabet, sequence_length=env.sequence_length)
+        sampler = GFlowNetSampler(
+            env,
+            policy,
+            proxy=proxy,
+            reward=TemperedReward(beta=beta),
+            config=TrainingConfig(steps=steps, batch_size=64, seed=seed),
+            objective=objective,
+            genetic=GeneticAlgorithm(env, seed=seed),
+            genetic_config=GeneticConfig(offspring=64, warmup=max(steps // 10, 1)),
+            seed=seed,
+        )
+        return _campaign(task, landscape, sampler, ensemble)
+
+    return methodology
+
+
 def _random(env: MutationEnvironment, seed: int) -> Sampler:
     return RandomMutagenesis(env, seed=seed)
 
@@ -238,6 +286,7 @@ BASELINES: dict[str, Methodology] = {
 OBJECTIVES: dict[str, Methodology] = {
     "gfn-tb": gflownet(TrajectoryBalance()),
     "gfn-contrastive": gflownet(ContrastiveBalance(prune_threshold=0.1)),
+    "genetic-gfn": genetic_gflownet(TrajectoryBalance()),
 }
 
 
