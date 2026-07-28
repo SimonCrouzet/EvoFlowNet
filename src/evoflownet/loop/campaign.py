@@ -56,6 +56,8 @@ from evoflownet.metrics.diversity import diversity
 from evoflownet.tracking.base import NoOpTracker
 
 if TYPE_CHECKING:
+    import numpy.typing as npt
+
     from evoflownet.acquisition.base import Acquisition, BatchSelector
     from evoflownet.algorithms.base import Sampler
     from evoflownet.core.types import Fitness, Tokens
@@ -155,6 +157,11 @@ class Campaign:
         """Total oracle calls the campaign may spend."""
         return self._rounds * self._batch_size
 
+    @property
+    def sampler(self) -> Sampler:
+        """The method under test, for reading its own accounting after a run."""
+        return self._sampler
+
     def run(self) -> CampaignResult:
         """Execute every round and return the ledger.
 
@@ -173,7 +180,9 @@ class Campaign:
             if remaining <= 0:
                 break
 
-            proposed, screened, batch = self._design(index, measured, values, seen, remaining)
+            proposed, screened, batch, predicted = self._design(
+                index, measured, values, seen, remaining
+            )
             if batch.shape[0] == 0:
                 # The sampler cannot produce anything unmeasured. Stopping is
                 # honest; padding the batch with repeats would spend the budget
@@ -194,6 +203,7 @@ class Campaign:
                 batch=batch,
                 scores=scores,
                 previous_best=best_so_far,
+                predicted=predicted,
             )
             best_so_far = record.best_so_far
             records.append(record)
@@ -230,7 +240,7 @@ class Campaign:
         values: list[Fitness],
         seen: set[bytes],
         remaining: int,
-    ) -> tuple[int, int, Tokens]:
+    ) -> tuple[int, int, Tokens, npt.NDArray[np.floating] | None]:
         """Choose the batch, returning proposals generated, pool screened, and batch.
 
         Round 0 has nothing to fit a surrogate on, so it is the sampler's own
@@ -252,13 +262,13 @@ class Campaign:
         screened = pool.shape[0]
         # Round 0 has no model to score with, so the pool order stands.
         if screened == 0 or index == 0 or self._surrogate is None:
-            return proposed, screened, pool[:size]
+            return proposed, screened, pool[:size], None
 
         mean, spread = self._surrogate.predict(pool)
         best_observed = self._best_observed(values)
         scored = self._acquisition.score(mean, spread, best_observed=best_observed)
         chosen = self._selector.select(pool, scored, size)
-        return proposed, screened, pool[chosen]
+        return proposed, screened, pool[chosen], mean[chosen]
 
     def _pool(self, index: int) -> Tokens:
         """The candidates this round selects from, before deduplication."""
@@ -288,6 +298,7 @@ class Campaign:
         batch: Tokens,
         scores: Fitness,
         previous_best: float,
+        predicted: npt.NDArray[np.floating] | None = None,
     ) -> RoundRecord:
         """Summarise a completed round."""
         flat = np.asarray(scores, dtype=np.float64).reshape(scores.shape[0], -1).max(axis=1)
@@ -303,6 +314,7 @@ class Campaign:
             best_so_far=max(previous_best, best_in_round),
             mean_in_round=float(finite.mean()) if finite.size else float("-inf"),
             batch_diversity=(diversity(batch) if batch.shape[0] >= _MIN_FOR_DIVERSITY else 0.0),
+            surrogate_correlation=_correlation(predicted, flat),
         )
 
     @staticmethod
@@ -318,3 +330,24 @@ class Campaign:
             f"Campaign(sampler={self._sampler.name}, rounds={self._rounds}, "
             f"batch_size={self._batch_size}, budget={self.budget})"
         )
+
+
+def _correlation(
+    predicted: npt.NDArray[np.floating] | None, measured: npt.NDArray[np.floating]
+) -> float:
+    """Pearson correlation between prediction and measurement, or ``nan``.
+
+    Returns ``nan`` rather than zero when it cannot be computed -- no surrogate,
+    fewer than two finite measurements, or a constant on either side. Zero would
+    read as "the model is useless", which is a different claim from "there was
+    nothing to correlate".
+    """
+    if predicted is None:
+        return float("nan")
+    usable = np.isfinite(predicted) & np.isfinite(measured)
+    if usable.sum() < _MIN_FOR_DIVERSITY:
+        return float("nan")
+    left, right = predicted[usable], measured[usable]
+    if left.std() == 0 or right.std() == 0:
+        return float("nan")
+    return float(np.corrcoef(left, right)[0, 1])

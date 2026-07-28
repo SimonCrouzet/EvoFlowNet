@@ -58,6 +58,12 @@ class RoundRecord:
         batch_diversity: Mean pairwise Hamming distance within the batch. What
             a lab actually receives: a batch of near-duplicates is one
             experiment repeated, whatever its mean predicted value.
+        surrogate_correlation: Pearson correlation between what the surrogate
+            predicted for this batch and what the oracle measured. ``nan``
+            before a surrogate exists. This is the single most useful
+            diagnostic in the ledger: it separates a method failing because its
+            sampler proposes badly from one failing because its model cannot
+            tell good designs from bad, and those call for opposite fixes.
     """
 
     index: int
@@ -69,6 +75,7 @@ class RoundRecord:
     best_so_far: float
     mean_in_round: float
     batch_diversity: float
+    surrogate_correlation: float = float("nan")
 
     @property
     def feasible_fraction(self) -> float:
