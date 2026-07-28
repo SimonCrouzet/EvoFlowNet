@@ -23,14 +23,23 @@ import numpy as np
 import torch
 from omegaconf import DictConfig, OmegaConf
 
+from evoflownet.algorithms.baselines.genetic import GeneticAlgorithm
+from evoflownet.algorithms.baselines.mutagenesis import HillClimbing, RandomMutagenesis
+from evoflownet.algorithms.gflownet.sampler import GFlowNetSampler
 from evoflownet.algorithms.gflownet.training import train_trajectory_balance
+from evoflownet.algorithms.inner_loop import ProxyOptimising
+from evoflownet.loop.campaign import Campaign
+from evoflownet.surrogate.proxy import ProxyLandscape
 from evoflownet.tracking.provenance import run_provenance
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-#: Commands the entry point accepts. Only ``train`` is implemented so far.
-COMMANDS = ("train",)
+    from evoflownet.algorithms.base import Sampler
+    from evoflownet.loop.ledger import CampaignResult
+
+#: Commands the entry point accepts.
+COMMANDS = ("train", "campaign")
 
 _USAGE = f"""usage: evoflownet <command> [hydra overrides]
 
@@ -40,9 +49,14 @@ commands:
 examples:
   evoflownet train
   evoflownet train landscape=gb1 training.steps=5000
-  evoflownet train reward.beta=1.0 tracker=noop
-  evoflownet train --help          show every configurable option
+  evoflownet campaign
+  evoflownet campaign sampler=genetic acquisition=ucb selector=diverse
+  evoflownet campaign campaign.rounds=8 campaign.batch_size=48
+  evoflownet <command> --help       show every configurable option
 """
+
+#: Samplers the campaign command can drive, by name.
+SAMPLERS = ("gflownet", "genetic", "hill-climb", "random")
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="train")
@@ -101,6 +115,127 @@ def train(config: DictConfig) -> None:
         tracker.log_metrics(final, step=training.steps)
 
 
+@hydra.main(version_base=None, config_path="../configs", config_name="campaign")
+def campaign(config: DictConfig) -> None:
+    """Run a lab-in-the-loop campaign under a fixed oracle budget.
+
+    Every sampler is driven by the same loop and charged for the same thing, so
+    a difference between runs is a difference between methods rather than
+    between harnesses. Only the measured batch is charged: a GFlowNet trains
+    against a surrogate proxy, never the assay.
+
+    Args:
+        config: Composed Hydra configuration.
+
+    Raises:
+        ValueError: If ``sampler`` is not one this command can build.
+    """
+    torch.manual_seed(config.seed)
+
+    landscape = hydra.utils.instantiate(config.landscape)
+    env = hydra.utils.instantiate(
+        config.env,
+        parent=_starting_sequence(landscape),
+        alphabet=landscape.alphabet,
+        transitions=getattr(landscape, "transition_matrix", None),
+        _convert_="object",
+    )
+    surrogate = hydra.utils.instantiate(
+        config.surrogate,
+        n_tokens=landscape.alphabet.size,
+        sequence_length=landscape.sequence_length,
+        seed=config.seed,
+    )
+    sampler = _build_sampler(config, env, surrogate, landscape)
+
+    with hydra.utils.instantiate(config.tracker) as tracker:
+        tracker.log_config(
+            {
+                "config": OmegaConf.to_container(config, resolve=True),
+                **run_provenance(seed=config.seed),
+            }
+        )
+        result = Campaign(
+            landscape=landscape,
+            sampler=sampler,
+            surrogate=surrogate,
+            acquisition=hydra.utils.instantiate(config.acquisition),
+            selector=hydra.utils.instantiate(config.selector),
+            rounds=config.campaign.rounds,
+            batch_size=config.campaign.batch_size,
+            pool_size=config.campaign.pool_size,
+            skip_measured=config.campaign.skip_measured,
+            tracker=tracker,
+        ).run()
+        tracker.log_metrics(result.summary(), step=len(result.rounds))
+    _report_campaign(result)
+
+
+def _build_sampler(
+    config: DictConfig, env: object, surrogate: object, landscape: object
+) -> Sampler:
+    """Construct the sampler named in the configuration.
+
+    A GFlowNet is handed a proxy over the *same* surrogate instance the campaign
+    refits, so it trains against each round's model without the loop needing to
+    know which samplers care. The classical baselines get the same proxy access,
+    because comparing a method that optimises the model against one that only
+    meets it as a filter is not a comparison of methods.
+    """
+    name = str(config.sampler)
+    if name == "gflownet":
+        policy = hydra.utils.instantiate(
+            config.policy,
+            n_tokens=landscape.alphabet.size,  # type: ignore[attr-defined]
+            sequence_length=landscape.sequence_length,  # type: ignore[attr-defined]
+            n_actions=env.n_actions,  # type: ignore[attr-defined]
+        )
+        return GFlowNetSampler(
+            env,  # type: ignore[arg-type]
+            policy,
+            proxy=ProxyLandscape(
+                surrogate,  # type: ignore[arg-type]
+                alphabet=landscape.alphabet,  # type: ignore[attr-defined]
+                sequence_length=landscape.sequence_length,  # type: ignore[attr-defined]
+            ),
+            reward=hydra.utils.instantiate(config.reward),
+            config=hydra.utils.instantiate(config.training),
+            objective=hydra.utils.instantiate(config.objective),
+            seed=config.seed,
+        )
+
+    builders = {
+        "genetic": GeneticAlgorithm,
+        "hill-climb": HillClimbing,
+        "random": RandomMutagenesis,
+    }
+    if name not in builders:
+        raise ValueError(f"unknown sampler {name!r}; expected one of {SAMPLERS}")
+    inner = builders[name](env, seed=config.seed)
+    return ProxyOptimising(
+        inner,
+        proxy=ProxyLandscape(
+            surrogate,  # type: ignore[arg-type]
+            alphabet=landscape.alphabet,  # type: ignore[attr-defined]
+            sequence_length=landscape.sequence_length,  # type: ignore[attr-defined]
+        ),
+    )
+
+
+def _report_campaign(result: CampaignResult) -> None:
+    """Print the ledger, so a run is readable without opening a tracker."""
+    print(f"\n{result.sampler}: {result.oracle_calls} oracle calls")
+    for record in result.rounds:
+        print(
+            f"  round {record.index}: measured {record.evaluated:>4}  "
+            f"best {record.best_so_far:>8.4f}  "
+            f"feasible {record.feasible_fraction:.3f}  "
+            f"diversity {record.batch_diversity:.2f}"
+        )
+    if (regret := result.simple_regret) is not None:
+        print(f"  simple regret {regret:.4f}")
+
+
 def _starting_sequence(landscape: object) -> np.ndarray:
     """The parent every trajectory starts from.
 
@@ -141,7 +276,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     # Hydra reads sys.argv directly, so the subcommand has to be removed.
     sys.argv = [sys.argv[0], *rest]
-    train()
+    {"train": train, "campaign": campaign}[command]()
     return 0
 
 
