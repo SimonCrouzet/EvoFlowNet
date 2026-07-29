@@ -35,18 +35,16 @@ from evoflownet.benchmark.suite import (
     run_task,
     run_tier,
 )
-from evoflownet.benchmark.tasks import BY_NAME, SUITE, Task
+from evoflownet.benchmark.tasks import Task
 
 __all__ = [
     "BASELINES",
-    "BY_NAME",
     "FINGERPRINTED",
     "MAIN",
     "ML_CONVENTION",
     "MUTATIONS",
     "OBJECTIVES",
     "PLATE",
-    "SUITE",
     "WET_LAB_PROTOCOLS",
     "ArmFactory",
     "ArmResult",

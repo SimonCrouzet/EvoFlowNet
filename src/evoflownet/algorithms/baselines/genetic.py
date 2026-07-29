@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from evoflownet.algorithms.base import Sampler
+from evoflownet.algorithms.baselines._values import single_objective
 
 if TYPE_CHECKING:
     from evoflownet.core.types import Fitness, Tokens
@@ -163,8 +164,12 @@ class GeneticAlgorithm(Sampler):
         Args:
             sequences: The evaluated candidates.
             values: An ``(n, 1)`` array of their objective values.
+
+        Raises:
+            ValueError: If the values carry more than one objective, which gives
+                selection no single order to keep the best by.
         """
-        flat = np.asarray(values, dtype=np.float64).reshape(-1)
+        flat = single_objective(values)
         combined = np.concatenate([self._population, np.asarray(sequences)])
         scores = np.concatenate([self._fitness, flat])
         # -inf sorts last, so unevaluated founders are displaced by anything real.

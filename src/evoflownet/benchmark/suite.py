@@ -57,6 +57,17 @@ if TYPE_CHECKING:
 #: Mutation budget, held constant so diagnostics transfer to the main table.
 MUTATIONS = 4
 
+#: What a stored campaign's result can depend on. Every methodology is built in
+#: ``benchmark.methods``, and every campaign runs through ``loop.campaign``, so
+#: their transitive imports bound what could have changed the number. Stated
+#: here rather than derived, because a wrong entry point silently shrinks the
+#: dependency set -- and a record that under-declares what it depends on is
+#: exactly the stale-result failure the fingerprint exists to prevent.
+RESULT_DEPENDENCIES = (
+    "evoflownet.benchmark.methods",
+    "evoflownet.loop.campaign",
+)
+
 
 def _ehrlich(**kwargs: object) -> Callable[[], FitnessLandscape]:
     """A factory for an Ehrlich instance with fixed parameters."""
@@ -283,6 +294,12 @@ def run_task(
             )
             store.append(
                 store.stamp(
+                    # Declaring entry points is what makes the fingerprint pay: a
+                    # record then goes stale only when something it can
+                    # actually reach changed, instead of when any package did.
+                    # Without this the mechanism is correct and useless --
+                    # adding an unrelated file invalidated ~3,900 campaigns.
+                    depends_on=RESULT_DEPENDENCIES,
                     task=task.name,
                     method=name,
                     seed=seed,

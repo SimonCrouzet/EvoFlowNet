@@ -351,8 +351,21 @@ class Campaign:
 
     @staticmethod
     def _best_observed(values: list[Fitness]) -> float:
-        """Best finite measurement so far, for improvement-based acquisition."""
-        flat = np.concatenate(values).reshape(-1)
+        """Best finite measurement so far, for improvement-based acquisition.
+
+        Args:
+            values: One ``(n, 1)`` array of objective values per completed round.
+
+        Returns:
+            The largest finite value measured, or ``0.0`` if nothing finite has
+            been measured yet -- the incumbent an improvement rule falls back to
+            before there is one.
+
+        Raises:
+            ValueError: If the measurements carry more than one objective, where
+                "the best value so far" is not defined without a scalarisation.
+        """
+        flat = _single_objective(np.concatenate(values))
         finite = flat[np.isfinite(flat)]
         return float(finite.max()) if finite.size else 0.0
 
@@ -383,3 +396,30 @@ def _correlation(
     if left.std() == 0 or right.std() == 0:
         return float("nan")
     return float(np.corrcoef(left, right)[0, 1])
+
+
+def _single_objective(values: Fitness) -> npt.NDArray[np.float64]:
+    """Accept ``(n,)`` or single-objective ``(n, 1)`` and return ``(n,)``.
+
+    Args:
+        values: Objective values for the measurements made so far.
+
+    Returns:
+        An ``(n,)`` array, one value per measured design.
+
+    Raises:
+        ValueError: If the input has more than one objective. Flattening it
+            would hand the acquisition rule an incumbent taken across objectives
+            of different scales, which no expected-improvement calculation is
+            defined against.
+    """
+    array = np.asarray(values, dtype=np.float64)
+    if array.ndim == 1:
+        return array
+    if array.ndim == 2 and array.shape[1] == 1:  # noqa: PLR2004 - a single objective
+        return array[:, 0]
+    raise ValueError(
+        f"expected shape (n,) or (n, 1), got {array.shape}; multi-objective "
+        f"measurements must be scalarised before an improvement-based acquisition "
+        f"rule has an incumbent to improve on"
+    )

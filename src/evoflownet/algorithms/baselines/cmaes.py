@@ -62,6 +62,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from evoflownet.algorithms.base import Sampler
+from evoflownet.algorithms.baselines._values import single_objective
 
 if TYPE_CHECKING:
     import numpy.typing as npt
@@ -219,6 +220,10 @@ class CMAES(Sampler):
         Args:
             sequences: The evaluated candidates.
             values: An ``(n, 1)`` array of their objective values.
+
+        Raises:
+            ValueError: If the values carry more than one objective, which gives
+                the rank-based update no single ordering to work from.
         """
         rows, scores = self._matched(sequences, values)
         if rows.size < _MIN_FOR_UPDATE:
@@ -338,8 +343,12 @@ class CMAES(Sampler):
 
         Returns:
             The sample indices and their finite objective values.
+
+        Raises:
+            ValueError: If the values carry more than one objective, which gives
+                the rank-based update no single ordering to work from.
         """
-        flat = np.asarray(values, dtype=np.float64).reshape(-1)
+        flat = single_objective(values)
         contiguous = np.ascontiguousarray(np.asarray(sequences))
         rows: list[int] = []
         scores: list[float] = []

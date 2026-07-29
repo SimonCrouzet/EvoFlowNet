@@ -11,9 +11,12 @@ import pytest
 
 from evoflownet.algorithms.base import Sampler
 from evoflownet.algorithms.baselines import (
+    CMAES,
+    MLDE,
     GeneticAlgorithm,
     HillClimbing,
     RandomMutagenesis,
+    SimulatedAnnealing,
 )
 from evoflownet.core import Alphabet
 from evoflownet.env.mutation import MutationEnvironment
@@ -256,3 +259,43 @@ class TestReproducibility:
     def test_the_same_seed_gives_the_same_proposals(self, make):
         env = make_env()
         assert np.array_equal(make(env).propose(16), make(env).propose(16))
+
+
+#: Every baseline that actually reads its scores. RandomMutagenesis is absent
+#: because it ignores observe entirely, so there is nothing for it to misread.
+OBSERVERS = [
+    lambda env: HillClimbing(env, seed=0),
+    lambda env: GeneticAlgorithm(env, population_size=32, seed=0),
+    lambda env: SimulatedAnnealing(env, seed=0),
+    lambda env: CMAES(env, seed=0),
+    lambda env: MLDE(env, training_size=16, seed=0),
+]
+
+
+class TestMultiObjectiveValuesAreRefused:
+    @pytest.mark.parametrize("make", OBSERVERS)
+    def test_two_objectives_are_refused_rather_than_flattened(self, make):
+        # reshape(-1) on an (n, 2) array yields 2n numbers, which then zip
+        # against n sequences and pair half the batch with somebody else's
+        # score. Nothing raises and the run completes, so the only way this is
+        # ever caught is here.
+        env = make_env()
+        sampler = make(env)
+        batch = sampler.propose(4)
+        values = np.arange(8, dtype=np.float64).reshape(4, 2)
+        with pytest.raises(ValueError, match="must be scalarised"):
+            sampler.observe(batch, values)
+
+    @pytest.mark.parametrize("make", OBSERVERS)
+    def test_a_single_objective_column_is_still_accepted(self, make):
+        env = make_env()
+        sampler = make(env)
+        batch = sampler.propose(4)
+        sampler.observe(batch, toy_landscape(batch))
+
+    @pytest.mark.parametrize("make", OBSERVERS)
+    def test_a_flat_vector_is_still_accepted(self, make):
+        env = make_env()
+        sampler = make(env)
+        batch = sampler.propose(4)
+        sampler.observe(batch, toy_landscape(batch).reshape(-1))
