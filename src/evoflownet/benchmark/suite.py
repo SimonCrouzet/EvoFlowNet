@@ -57,6 +57,17 @@ if TYPE_CHECKING:
 #: Mutation budget, held constant so diagnostics transfer to the main table.
 MUTATIONS = 4
 
+#: Where a campaign's code actually starts, for staleness. Everything a run
+#: touches is reachable from these two: the methodology table pulls in every
+#: sampler, surrogate, acquisition rule and landscape, and the loop pulls in the
+#: ledger and its metrics. Declaring them rather than hashing the whole package
+#: tree is what stops an unrelated addition -- a new Pareto indicator, say --
+#: invalidating a genetic-algorithm result it cannot possibly have influenced.
+CAMPAIGN_ENTRY_POINTS = (
+    "evoflownet.benchmark.methods",
+    "evoflownet.loop.campaign",
+)
+
 #: What a stored campaign's result can depend on. Every methodology is built in
 #: ``benchmark.methods``, and every campaign runs through ``loop.campaign``, so
 #: their transitive imports bound what could have changed the number. Stated
