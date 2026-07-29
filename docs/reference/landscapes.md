@@ -3,7 +3,7 @@
 The functions being optimised against. A landscape is the only thing in the library a wet lab
 would recognise as ground truth: sequences in, numbers out, and every call charged.
 
-Two are built in, chosen because their correct answers are known — which means you can check
+Four are built in, chosen because their correct answers are known — which means you can check
 whether a method actually worked, not just whether it produced a plausible number.
 
 ::: evogfn.landscapes.base
@@ -24,3 +24,5 @@ cannot be accidentally bypassed and an exact oracle cannot be quietly assumed.
 ## Types
 
 ::: evogfn.core.types
+
+::: evogfn.landscapes.ch65
