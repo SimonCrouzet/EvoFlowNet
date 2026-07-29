@@ -6,6 +6,15 @@ indistinguishable from random mutagenesis in a results table, and it would make
 the project's central comparison look far more favourable than it is. So the
 handover is tested explicitly, and the ranking is tested against the null it
 would otherwise silently collapse into.
+
+The second failure, added with the ensemble, is subtler and worse: shipping a
+*weakened* version of somebody else's published method and then reporting that we
+beat it. Two things guard against that here. The ensemble is measured against the
+single kernel ridge it replaced, on a landscape with the pairwise epistasis MLDE
+exists to capture, so a regression in the baseline's strength shows up as a test
+failure rather than as a favourable number. And the budget arithmetic -- that the
+published protocol needs 480 assays where this repository's campaigns have 384 --
+is asserted rather than described, so the handicap cannot quietly disappear.
 """
 
 import numpy as np
@@ -15,11 +24,17 @@ from evoflownet.algorithms.base import Sampler
 from evoflownet.algorithms.baselines import (
     MLDE,
     PUBLISHED_BATCH_SIZE,
+    PUBLISHED_BUDGET,
+    PUBLISHED_CV_FOLDS,
+    PUBLISHED_MODELS_AVERAGED,
     PUBLISHED_TRAINING_SIZE,
     RandomMutagenesis,
 )
 from evoflownet.core import Alphabet
 from evoflownet.env.mutation import MutationEnvironment
+
+#: The repository's four-plate campaign budget, which MLDE-as-published exceeds.
+FOUR_PLATE_BUDGET = 384
 
 
 def make_env(length=8, symbols="ABCD", max_mutations=6, transitions=None):
@@ -41,6 +56,71 @@ def constrained_transitions(vocab, forbidden):
 def toy_landscape(sequences):
     """Reward sequences for containing token 1, so improvement is detectable."""
     return (np.asarray(sequences) == 1).sum(axis=1, keepdims=True).astype(np.float64)
+
+
+def epistatic_landscape(length, vocab, seed):
+    """An additive field plus random pairwise couplings.
+
+    This is a Potts model, and it is the landscape MLDE is *for*: a purely
+    additive fitness needs no interaction terms and would let a linear model tie
+    the ensemble, which would test nothing about whether epistasis is captured.
+    """
+    rng = np.random.default_rng(seed)
+    field = rng.normal(size=(length, vocab))
+    pairs = [(i, (i * 3 + 1) % length) for i in range(length) if i != (i * 3 + 1) % length]
+    couplings = rng.normal(size=(len(pairs), vocab, vocab)) * 2.0
+
+    def score(sequences):
+        X = np.asarray(sequences)
+        total = field[np.arange(X.shape[1]), X].sum(axis=1)
+        for index, (i, j) in enumerate(pairs):
+            total += couplings[index, X[:, i], X[:, j]]
+        return total[:, None]
+
+    return score
+
+
+def single_kernel_ridge(train_X, train_y, query_X, length):
+    """The model this file used to fit: one kernel ridge, degree 2, alpha 1.
+
+    Reproduced here rather than imported because it no longer exists in the
+    source. It is the thing the ensemble has to beat to have been worth adding,
+    so its two hyperparameters are pinned to the old defaults rather than
+    exposed -- a tunable reference is not the model that was replaced.
+    """
+
+    def gram(left, right):
+        return ((left[:, None, :] == right[None, :, :]).sum(axis=2) / length) ** 2
+
+    offset = train_y.mean()
+    K = gram(train_X, train_X)
+    K[np.diag_indices_from(K)] += 1.0
+    dual = np.linalg.solve(K, train_y - offset)
+    return gram(query_X, train_X) @ dual + offset
+
+
+def spearman(a, b):
+    """Rank correlation, which is all MLDE's predictions are ever used for."""
+    ranked_a = np.argsort(np.argsort(a)).astype(float)
+    ranked_b = np.argsort(np.argsort(b)).astype(float)
+    return float(np.corrcoef(ranked_a, ranked_b)[0, 1])
+
+
+def held_out_comparison(seed, length=12, vocab=4, max_mutations=10, training=96):
+    """Rank correlation of the ensemble and of the single ridge, on one seed."""
+    env = make_env(length=length, symbols="ABCDEFGHIJ"[:vocab], max_mutations=max_mutations)
+    score = epistatic_landscape(length, vocab, seed)
+    drawer = RandomMutagenesis(env, seed=100 + seed)
+    train_X = np.asarray(drawer.propose(training))
+    held_X = np.asarray(drawer.propose(256))
+    train_y = score(train_X)
+    held_y = score(held_X)[:, 0]
+
+    sampler = MLDE(env, training_size=training, seed=seed)
+    sampler.observe(train_X, train_y)
+    ensemble = sampler.predict(held_X)
+    single = single_kernel_ridge(train_X, train_y[:, 0], held_X, length)
+    return spearman(ensemble, held_y), spearman(single, held_y)
 
 
 def train(sampler, rounds=2, size=32, landscape=toy_landscape):
@@ -184,13 +264,16 @@ class TestTheModelActuallyRanks:
             last = max(last, float(values.max()))
         assert last > first
 
-    def test_the_additive_ablation_still_fits(self):
-        # Degree 1 is the purely additive model, which is the control that says
-        # how much of MLDE's advantage needs pairwise epistasis at all.
+    def test_dropping_the_pairwise_kernel_still_fits(self):
+        # Degree 1 removes the pairwise-epistasis members, which is the control
+        # that says how much of MLDE's advantage needs interactions at all. It is
+        # not a *purely* additive ablation -- the local-kernel and k-NN members
+        # are nonlinear and stay -- and the docstring says so.
         env = make_env(length=10, symbols="ABCD", max_mutations=8)
         sampler = train(MLDE(env, training_size=64, kernel_degree=1, seed=0), rounds=2, size=32)
         chosen = sampler.propose(32)
         assert sampler.is_fitted
+        assert not any(name.startswith("poly2") for name in sampler.members)
         assert env.is_reachable(chosen).all()
 
     def test_it_does_not_re_propose_what_has_already_been_assayed(self):
@@ -219,6 +302,149 @@ class TestFeasibility:
             sampler.observe(proposals, toy_landscape(proposals))
 
 
+class TestTheEnsemble:
+    def test_the_roster_holds_more_than_one_model_class(self):
+        # The point of the rewrite. A roster of one is a single model wearing an
+        # ensemble's name, which is what this file used to ship.
+        members = MLDE(make_env()).members
+        assert len(members) > 1
+        assert any(name.startswith("poly") for name in members)
+        assert any(name.startswith("local") for name in members)
+        assert any(name.startswith("knn") for name in members)
+
+    def test_it_averages_only_the_cross_validated_best_few(self):
+        # Wittmann et al. rank by cross-validation error and average the top
+        # three. Averaging the whole roster would drag the good members toward
+        # the bad ones, which is the failure this selection step exists to avoid.
+        sampler = train(MLDE(make_env(), training_size=64), rounds=2, size=32)
+        sampler.propose(16)
+        assert len(sampler.selected_members) == PUBLISHED_MODELS_AVERAGED
+        assert set(sampler.selected_members) <= set(sampler.members)
+        assert len(set(sampler.selected_members)) == PUBLISHED_MODELS_AVERAGED
+
+    def test_nothing_is_selected_before_the_model_takes_over(self):
+        assert MLDE(make_env(), training_size=64).selected_members == ()
+
+    def test_n_averaged_controls_how_many_are_averaged(self):
+        sampler = train(MLDE(make_env(), training_size=64, n_averaged=1), rounds=2, size=32)
+        sampler.propose(16)
+        assert len(sampler.selected_members) == 1
+
+    def test_n_averaged_is_clamped_to_the_roster(self):
+        # Asking for more members than exist is a configuration error the caller
+        # cannot act on, so it is met by averaging everything rather than raising.
+        sampler = train(MLDE(make_env(), training_size=64, n_averaged=999), rounds=2, size=32)
+        sampler.propose(16)
+        assert len(sampler.selected_members) == len(sampler.members)
+
+    def test_the_selection_is_reproducible(self):
+        # Selection is part of the fitted model, so a campaign is only
+        # reproducible if the same seed picks the same members.
+        runs = []
+        for _ in range(2):
+            sampler = train(MLDE(make_env(), training_size=64, seed=11), rounds=2, size=32)
+            sampler.propose(16)
+            runs.append(sampler.selected_members)
+        assert runs[0] == runs[1]
+
+    def test_predicting_before_anything_is_measured_is_refused(self):
+        env = make_env()
+        with pytest.raises(RuntimeError, match="at least 2 finite measurements"):
+            MLDE(env).predict(np.zeros((4, env.sequence_length), dtype=np.int32))
+
+    def test_it_predicts_better_than_the_single_kernel_ridge_it_replaced(self):
+        # The reason for the rewrite, and the number that has to hold: on a
+        # landscape with pairwise epistasis the ensemble must rank held-out
+        # variants better than the lone degree-2 kernel ridge this file used to
+        # fit. If it does not, the baseline was weakened, not strengthened, and
+        # every comparison drawn against it is worth less than it looks.
+        results = [held_out_comparison(seed) for seed in range(8)]
+        ensemble = np.array([rho for rho, _ in results])
+        single = np.array([rho for _, rho in results])
+        assert ensemble.mean() > single.mean()
+        assert (ensemble > single).sum() >= 6
+
+    def test_it_still_wins_at_the_published_training_size(self):
+        # Where MLDE is actually meant to run. Selection has four times the data
+        # here, so this is the comparison least confounded by selection noise.
+        results = [held_out_comparison(seed, training=PUBLISHED_TRAINING_SIZE) for seed in range(4)]
+        ensemble = np.array([rho for rho, _ in results])
+        single = np.array([rho for _, rho in results])
+        assert ensemble.mean() > single.mean()
+
+    def test_a_fitted_ensemble_only_proposes_reachable_designs(self):
+        # The ensemble ranks a pool; a bug in the ranking must not be able to
+        # promote something the environment cannot build.
+        env = make_env(length=10, symbols="ABCD", max_mutations=3)
+        sampler = MLDE(env, training_size=32, seed=4)
+        for _ in range(5):
+            proposals = sampler.propose(32)
+            sampler.observe(proposals, toy_landscape(proposals))
+        assert sampler.is_fitted
+        assert env.is_reachable(sampler.propose(32)).all()
+
+    def test_folds_shrink_rather_than_break_on_a_tiny_training_set(self):
+        # `training_size` can legitimately be smaller than `cv_folds`; a fold
+        # with nothing in it would raise mid-campaign rather than at construction.
+        env = make_env()
+        sampler = MLDE(env, training_size=3, cv_folds=PUBLISHED_CV_FOLDS, seed=0)
+        proposals = sampler.propose(3)
+        sampler.observe(proposals, toy_landscape(proposals))
+        assert env.is_reachable(sampler.propose(4)).all()
+        assert sampler.is_fitted
+
+
+class TestTheBudgetTension:
+    def test_the_published_protocol_does_not_fit_the_four_plate_budget(self):
+        # The whole reason the default is a compression. If this ever passes
+        # quietly, someone has changed a constant that a results table depends on.
+        assert PUBLISHED_BUDGET == PUBLISHED_TRAINING_SIZE + PUBLISHED_BATCH_SIZE
+        assert PUBLISHED_BUDGET > FOUR_PLATE_BUDGET
+        assert PUBLISHED_TRAINING_SIZE >= FOUR_PLATE_BUDGET
+
+    def test_the_default_is_flagged_as_below_the_published_training_size(self):
+        sampler = MLDE(make_env())
+        assert sampler.runs_below_published_training_size
+        assert sampler.required_budget <= FOUR_PLATE_BUDGET
+
+    def test_the_budget_note_names_the_handicap(self):
+        note = MLDE(make_env()).budget_note
+        assert str(PUBLISHED_TRAINING_SIZE) in note
+        assert str(PUBLISHED_BUDGET) in note
+        assert "handicapped" in note
+
+    def test_as_published_runs_wittmanns_own_split(self):
+        sampler = MLDE.as_published(make_env(), seed=3)
+        assert not sampler.runs_below_published_training_size
+        assert sampler.required_budget == PUBLISHED_BUDGET
+        assert "handicapped" not in sampler.budget_note
+
+    def test_as_published_screens_at_random_for_the_whole_four_plate_budget(self):
+        # The concrete form of the tension: run the published method inside this
+        # repository's budget and it never gets to propose a designed variant.
+        env = make_env()
+        sampler = MLDE.as_published(env, seed=0)
+        for _ in range(FOUR_PLATE_BUDGET // PUBLISHED_BATCH_SIZE):
+            proposals = sampler.propose(PUBLISHED_BATCH_SIZE)
+            sampler.observe(proposals, toy_landscape(proposals))
+        assert sampler.training_examples == FOUR_PLATE_BUDGET
+        assert not sampler.is_fitted
+
+    def test_as_published_does_fit_once_it_is_given_its_own_budget(self):
+        env = make_env()
+        sampler = MLDE.as_published(env, seed=0)
+        for _ in range(PUBLISHED_BUDGET // PUBLISHED_BATCH_SIZE):
+            proposals = sampler.propose(PUBLISHED_BATCH_SIZE)
+            sampler.observe(proposals, toy_landscape(proposals))
+        assert sampler.is_fitted
+        assert env.is_reachable(sampler.propose(PUBLISHED_BATCH_SIZE)).all()
+
+    def test_the_default_training_size_is_unchanged(self):
+        # Guards the instruction that strengthening the model must not silently
+        # move the operating point of an existing benchmark arm.
+        assert MLDE(make_env()).required_budget == 96 + PUBLISHED_BATCH_SIZE
+
+
 class TestValidation:
     @pytest.mark.parametrize(
         ("field", "value", "message"),
@@ -226,8 +452,10 @@ class TestValidation:
             ("training_size", 0, "training_size must be at least 1"),
             ("pool_multiplier", 0, "pool_multiplier must be at least 1"),
             ("max_attempts", 0, "max_attempts must be at least 1"),
+            ("n_averaged", 0, "n_averaged must be at least 1"),
             ("ridge_alpha", -1.0, "ridge_alpha must not be negative"),
             ("kernel_degree", 0, "kernel_degree must be at least 1"),
+            ("cv_folds", 1, "cv_folds must be at least 2"),
         ],
     )
     def test_an_impossible_configuration_is_refused(self, field, value, message):
