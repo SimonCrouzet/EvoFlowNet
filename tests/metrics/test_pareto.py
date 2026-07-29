@@ -1,5 +1,7 @@
 """Tests for the multi-objective indicators."""
 
+import time
+
 import numpy as np
 import pytest
 
@@ -66,6 +68,66 @@ class TestNonDominated:
     def test_missing_measurements_are_refused(self):
         with pytest.raises(ValueError, match="undefined"):
             non_dominated(np.array([[1.0, np.nan]]))
+
+
+def brute_force_non_dominated(values):
+    """The all-pairs definition, straight off the page.
+
+    This is the implementation `non_dominated` used to be, kept here as the
+    oracle. It is unusably slow and memory-hungry above a few thousand points,
+    which is exactly why the fast version exists -- and exactly why the fast
+    version has to be checked against it rather than against itself.
+    """
+    points = np.asarray(values, dtype=np.float64)
+    if points.shape[0] == 0:
+        return np.zeros(0, dtype=bool)
+    at_least_as_good = (points[None, :, :] >= points[:, None, :]).all(axis=2)
+    strictly_better = (points[None, :, :] > points[:, None, :]).any(axis=2)
+    return ~(at_least_as_good & strictly_better).any(axis=1)
+
+
+class TestNonDominatedAgreesWithTheDefinition:
+    @pytest.mark.parametrize("n_objectives", [1, 2, 3, 5])
+    def test_random_continuous_points(self, n_objectives):
+        rng = np.random.default_rng(11)
+        for _ in range(20):
+            values = rng.normal(size=(int(rng.integers(1, 120)), n_objectives))
+            assert non_dominated(values).tolist() == brute_force_non_dominated(values).tolist()
+
+    def test_heavily_tied_points(self):
+        # The case the lexicographic sweep is easiest to get wrong: a small
+        # integer alphabet makes duplicates and ties on a prefix of the
+        # objectives the rule rather than the exception, and duplicates must all
+        # survive while a tie on the first objective is still broken by the rest.
+        rng = np.random.default_rng(12)
+        for _ in range(40):
+            values = rng.integers(0, 3, size=(int(rng.integers(1, 80)), 3)).astype(np.float64)
+            assert non_dominated(values).tolist() == brute_force_non_dominated(values).tolist()
+
+    def test_points_with_infeasible_objectives(self):
+        rng = np.random.default_rng(13)
+        for _ in range(20):
+            values = rng.normal(size=(60, 3))
+            values[rng.integers(0, 60, size=15)] = -np.inf
+            assert non_dominated(values).tolist() == brute_force_non_dominated(values).tolist()
+
+    def test_a_whole_landscape_is_now_within_reach(self):
+        # 62,926 points is CH65's measured library, and the all-pairs form would
+        # ask for an (n, n, 3) boolean array -- about 12 GB. Deriving a reference
+        # front from a landscape is the whole reason this has to scale, so the
+        # size is the assertion.
+        rng = np.random.default_rng(14)
+        values = rng.normal(size=(62_926, 3))
+        started = time.perf_counter()
+        mask = non_dominated(values)
+        elapsed = time.perf_counter() - started
+        assert elapsed < 5.0, f"took {elapsed:.1f}s at 62,926 points"
+        assert mask.any()
+        # Spot-check against the definition: no reported front point may be
+        # beaten by anything in the whole set.
+        for point in values[mask][:50]:
+            beaten = (values >= point).all(axis=1) & (values > point).any(axis=1)
+            assert not beaten.any()
 
 
 class TestHypervolume:

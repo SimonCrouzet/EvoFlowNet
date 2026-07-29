@@ -6,13 +6,18 @@ are not, and no assertion about fitness would catch it -- so the accounting is
 tested harder than the optimisation.
 """
 
+import itertools
+
 import numpy as np
 import pytest
 
 from evogfn.acquisition import DiverseTopK, ExpectedImprovement, Greedy, TopK
 from evogfn.algorithms.base import Sampler
+from evogfn.algorithms.baselines.mutagenesis import RandomMutagenesis
 from evogfn.core.types import Alphabet
+from evogfn.env.mutation import MutationEnvironment
 from evogfn.landscapes.base import FitnessLandscape
+from evogfn.landscapes.ehrlich import EhrlichLandscape
 from evogfn.loop import Campaign
 from evogfn.surrogate import DeepEnsemble
 
@@ -401,3 +406,324 @@ class TestResult:
             pool_size=256,
         ).run()
         assert result.rounds[-1].rejection_ratio > 10
+
+
+class BallSampler(Sampler):
+    """Proposes everything its environment can build, in enumeration order.
+
+    Deterministic on purpose. Re-anchoring is a statement about *which designs
+    are reachable*, and a stochastic sampler would blur that into a question
+    about how lucky the draw was.
+    """
+
+    def __init__(self, env):
+        super().__init__()
+        self._env = env
+
+    def propose(self, n):
+        states = self._env.reachable_terminal_states()
+        self._count(states.shape[0])
+        return states[:n]
+
+    def reanchored(self, env):
+        return BallSampler(env)
+
+
+def mutation_env(max_mutations=2, parent=None, transitions=None):
+    return MutationEnvironment(
+        np.zeros(LENGTH, dtype=np.int32) if parent is None else parent,
+        ALPHABET,
+        max_mutations=max_mutations,
+        transitions=transitions,
+    )
+
+
+def small_ehrlich():
+    """A toy Ehrlich whose optimum is two mutations out, with a budget of one.
+
+    Returns:
+        The landscape and a feasible wild type. Chosen so the planted optimum is
+        further than one round's mutation budget and well within the campaign's
+        total, which is the regime the benchmark's real tasks are in -- 61 to 248
+        mutations away against a per-round budget of four.
+    """
+    landscape = EhrlichLandscape(
+        sequence_length=8,
+        vocab_size=4,
+        n_motifs=2,
+        motif_length=2,
+        quantization=2,
+        max_spacing=2,
+        transition_density=0.7,
+        seed=0,
+    )
+    return landscape, landscape.feasible_sequence(seed=0)
+
+
+class TestReanchoringIsOffByDefault:
+    """Nothing already measured moves because this mechanism was added."""
+
+    def test_a_campaign_without_an_environment_is_unchanged(self):
+        # Bit-identical against a fixed seed. The numbers are hard-coded rather
+        # than compared to a second run, so that a change to the loop cannot
+        # move both sides together and still pass.
+        result = Campaign(
+            landscape=CountingLandscape(),
+            sampler=RandomSampler(seed=7),
+            rounds=3,
+            batch_size=8,
+            pool_size=64,
+        ).run()
+        assert result.oracle_calls == 24
+        assert result.best_value == 4.0
+        assert result.trace() == [4.0, 4.0, 4.0]
+        assert result.sequences[0].tolist() == [3, 2, 2, 3, 2, 3]
+        assert int(result.sequences.sum()) == 232
+
+    def test_supplying_an_environment_alone_changes_no_measurement(self):
+        def run(**extra):
+            return Campaign(
+                landscape=CountingLandscape(),
+                sampler=RandomSampler(seed=7),
+                rounds=3,
+                batch_size=8,
+                pool_size=64,
+                **extra,
+            ).run()
+
+        plain = run()
+        watched = run(environment=mutation_env())
+        assert np.array_equal(plain.sequences, watched.sequences)
+        assert np.array_equal(plain.values, watched.values)
+        assert plain.trace() == watched.trace()
+
+    def test_a_fixed_anchor_never_leaves_the_wild_type(self):
+        # The failure this mechanism exists to fix, stated as a measurement: with
+        # the anchor held still, every round searches the same Hamming ball.
+        result = Campaign(
+            landscape=CountingLandscape(),
+            sampler=BallSampler(mutation_env(max_mutations=2)),
+            rounds=4,
+            batch_size=16,
+            pool_size=256,
+            environment=mutation_env(max_mutations=2),
+        ).run()
+        assert result.anchor_trace() == [0, 0, 0, 0]
+        assert result.best_value <= 2.0
+
+
+class TestReanchoringMovesTheSearch:
+    def test_cumulative_distance_outgrows_the_per_round_budget(self):
+        # The property the whole mechanism exists for. Two mutations per round
+        # is the budget; after four rounds the search is standing further out
+        # than that, which one fixed environment can never do.
+        env = mutation_env(max_mutations=2)
+        campaign = Campaign(
+            landscape=CountingLandscape(),
+            sampler=BallSampler(env),
+            rounds=4,
+            batch_size=16,
+            pool_size=256,
+            environment=env,
+            reanchor=True,
+        )
+        result = campaign.run()
+        assert result.anchor_trace() == [0, 1, 2, 3]
+        assert max(result.anchor_trace()) > env.max_mutations
+        moved = campaign.environment
+        assert moved is not None
+        assert moved.parent.tolist() == [1, 1, 1, 1, 0, 0]
+
+    def test_it_reaches_fitness_a_fixed_anchor_cannot(self):
+        def run(reanchor):
+            env = mutation_env(max_mutations=2)
+            return Campaign(
+                landscape=CountingLandscape(),
+                sampler=BallSampler(env),
+                rounds=4,
+                batch_size=16,
+                pool_size=256,
+                environment=env,
+                reanchor=reanchor,
+            ).run()
+
+        assert run(reanchor=True).best_value > run(reanchor=False).best_value
+
+    def test_the_ledger_names_the_design_each_round_started_from(self):
+        env = mutation_env(max_mutations=2)
+        result = Campaign(
+            landscape=CountingLandscape(),
+            sampler=BallSampler(env),
+            rounds=3,
+            batch_size=16,
+            pool_size=256,
+            environment=env,
+            reanchor=True,
+        ).run()
+        anchors = [record.anchor for record in result.rounds]
+        assert anchors[0] == (0, 0, 0, 0, 0, 0)
+        # Each anchor is a design that was actually measured, not a construction.
+        measured = {tuple(int(t) for t in row) for row in result.sequences}
+        assert all(anchor in measured for anchor in anchors[1:])
+
+    def test_the_anchor_only_moves_on_an_improvement(self):
+        # A round that learns nothing must not walk the search off a peak it
+        # has already found.
+        env = mutation_env(max_mutations=2)
+        result = Campaign(
+            landscape=CountingLandscape(infeasible_token=None),
+            sampler=BallSampler(env),
+            rounds=6,
+            batch_size=16,
+            pool_size=256,
+            environment=env,
+            reanchor=True,
+        ).run()
+        distances = result.anchor_trace()
+        assert distances == sorted(distances)
+        assert all(
+            second - first <= env.max_mutations for first, second in itertools.pairwise(distances)
+        )
+
+
+class TestProposalsStayInsideTheMovedEnvironment:
+    def test_every_measured_design_is_reachable_from_that_round_s_anchor(self):
+        landscape, wild_type = small_ehrlich()
+        env = MutationEnvironment(
+            wild_type,
+            landscape.alphabet,
+            max_mutations=1,
+            transitions=landscape.transition_matrix,
+        )
+        rebuilt = []
+
+        def factory(moved):
+            rebuilt.append(moved)
+            return RandomMutagenesis(moved, feasible_only=True, seed=len(rebuilt))
+
+        result = Campaign(
+            landscape=landscape,
+            sampler=RandomMutagenesis(env, feasible_only=True, seed=0),
+            rounds=4,
+            batch_size=12,
+            pool_size=64,
+            environment=env,
+            reanchor=True,
+            sampler_factory=factory,
+        ).run()
+
+        start = 0
+        for record in result.rounds:
+            batch = result.sequences[start : start + record.evaluated]
+            start += record.evaluated
+            anchored = MutationEnvironment(
+                np.array(record.anchor, dtype=np.int32),
+                landscape.alphabet,
+                max_mutations=1,
+                transitions=landscape.transition_matrix,
+            )
+            assert anchored.is_reachable(batch).all()
+            assert landscape.is_feasible(batch).all()
+        assert rebuilt, "the factory was never called, so nothing was re-anchored"
+
+
+class TestReanchoringOnEhrlich:
+    """The test that says the mechanism matters rather than merely runs."""
+
+    def test_the_optimum_is_out_of_reach_of_one_round_and_inside_the_campaign(self):
+        # The guard on the instance itself. Without this the comparison below
+        # could pass on a landscape where re-anchoring was never needed.
+        landscape, wild_type = small_ehrlich()
+        transitions = landscape.transition_matrix
+        one_round = MutationEnvironment(
+            wild_type, landscape.alphabet, max_mutations=1, transitions=transitions
+        )
+        whole_campaign = MutationEnvironment(
+            wild_type, landscape.alphabet, max_mutations=4, transitions=transitions
+        )
+        within_one = landscape.evaluate(one_round.reachable_terminal_states()).max()
+        within_four = landscape.evaluate(whole_campaign.reachable_terminal_states()).max()
+        assert within_one < within_four == 1.0
+
+    def test_re_anchoring_reaches_strictly_better_fitness(self):
+        landscape, wild_type = small_ehrlich()
+
+        def run(reanchor):
+            env = MutationEnvironment(
+                wild_type,
+                landscape.alphabet,
+                max_mutations=1,
+                transitions=landscape.transition_matrix,
+            )
+            return Campaign(
+                landscape=landscape,
+                sampler=BallSampler(env),
+                rounds=4,
+                batch_size=32,
+                pool_size=64,
+                environment=env,
+                reanchor=reanchor,
+            ).run()
+
+        fixed = run(reanchor=False)
+        moving = run(reanchor=True)
+        assert moving.best_value > fixed.best_value
+        assert moving.best_value == 1.0
+        assert moving.simple_regret == 0.0
+        assert max(moving.anchor_trace()) > 1
+
+
+class TestReanchoringIsRefusedWhenItCannotBeDone:
+    def test_an_infeasible_anchor_is_refused(self):
+        # The landscape scores this design finite; the environment cannot build
+        # it. Anchoring there would void feasibility-by-construction for every
+        # later round, silently.
+        transitions = np.ones((ALPHABET.size, ALPHABET.size))
+        transitions[1, 1] = 0.0
+        env = mutation_env(max_mutations=2, transitions=transitions)
+        campaign = Campaign(
+            landscape=CountingLandscape(),
+            sampler=BallSampler(env),
+            rounds=2,
+            batch_size=4,
+            pool_size=64,
+            initial_design=np.array([[1, 1, 0, 0, 0, 0]], dtype=np.int32),
+            environment=env,
+            reanchor=True,
+        )
+        with pytest.raises(ValueError, match="infeasible design"):
+            campaign.run()
+
+    def test_re_anchoring_without_an_environment_is_refused(self):
+        with pytest.raises(ValueError, match="needs the environment"):
+            Campaign(
+                landscape=CountingLandscape(),
+                sampler=BallSampler(mutation_env()),
+                reanchor=True,
+            )
+
+    def test_a_sampler_that_can_neither_be_told_nor_rebuilt_is_refused(self):
+        # Refused at construction rather than after a round of oracle calls.
+        with pytest.raises(ValueError, match="cannot follow a moved anchor"):
+            Campaign(
+                landscape=CountingLandscape(),
+                sampler=RandomSampler(),
+                environment=mutation_env(),
+                reanchor=True,
+            )
+
+    def test_a_factory_is_enough_for_a_sampler_that_cannot_be_told(self):
+        env = mutation_env(max_mutations=2)
+        campaign = Campaign(
+            landscape=CountingLandscape(),
+            sampler=RandomMutagenesis(env, seed=0),
+            rounds=3,
+            batch_size=8,
+            pool_size=64,
+            environment=env,
+            reanchor=True,
+            sampler_factory=lambda moved: RandomMutagenesis(moved, seed=1),
+        )
+        result = campaign.run()
+        assert max(result.anchor_trace()) > 0
+        assert campaign.sampler is not None

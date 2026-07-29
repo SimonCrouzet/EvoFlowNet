@@ -41,6 +41,24 @@ Action ``a < length * alphabet_size`` sets position ``a // alphabet_size`` to
 token ``a % alphabet_size``. The final index is the stop action. A single integer
 per action lets a policy emit one logit vector per state and apply the mask to it
 without any reshaping.
+
+The anchor is per round, not per campaign
+-----------------------------------------
+
+One environment describes one Hamming ball: everything it can build lies within
+``max_mutations`` of *its* parent. That is the right model for a single round and
+the wrong model for a campaign. Real directed evolution re-anchors between
+rounds -- round two starts from the best variant round one produced -- so
+cumulative distance from the wild type grows round over round while the per-round
+budget stays at four or five substitutions.
+
+Anchoring a whole campaign to the wild type is therefore not a conservative
+choice, it is a different experiment. On this repository's Ehrlich tasks the
+planted optimum sits 61-248 mutations from the parent against a per-round budget
+of four, so a fixed anchor makes the optimum unreachable *in principle* and any
+regret measured against it is a regret no method could have closed.
+[reanchored][evogfn.env.mutation.MutationEnvironment.reanchored] is what a
+campaign calls between rounds to move the ball.
 """
 
 from __future__ import annotations
@@ -165,6 +183,82 @@ class MutationEnvironment(SequenceEnvironment):
     def stop_action(self) -> int:
         """Index of the action that terminates a trajectory."""
         return self.n_mutation_actions
+
+    def reanchored(self, parent: Tokens) -> MutationEnvironment:
+        """Return the same environment anchored at a new parent.
+
+        A campaign round searches within ``max_mutations`` of the anchor. Keeping
+        the anchor at the wild type for every round caps the whole campaign at
+        one round's budget from it, which is why a planted optimum tens of
+        mutations away is unreachable no matter how many rounds are run. Moving
+        the anchor to the round's best variant is the mechanism that makes
+        cumulative distance grow while the per-round budget does not.
+
+        **A new object rather than a moved anchor.** Samplers, policies and
+        replay buffers hold a reference to the environment they were built
+        against, and every mask this class produces is read relative to
+        ``self._parent``: which positions count as mutated, how much budget is
+        left, how many parents a state has. Moving the anchor in place would
+        change all of that underneath a live trajectory -- a half-built state
+        would acquire a different mutation count and a mask forbidding what it
+        had already done -- and nothing would raise. The failure mode of a moved
+        anchor is wrong numbers, not an exception, so the anchor is immutable and
+        the caller has to decide, explicitly, what to hand the new environment
+        to.
+
+        Args:
+            parent: The design to anchor at, shape ``(length,)``. Ordinarily the
+                best variant measured so far.
+
+        Returns:
+            A new environment over the same alphabet, mutation budget,
+            transition matrix and stopping rule, anchored at ``parent``. This
+            environment is unchanged.
+
+        Raises:
+            ValueError: If ``parent`` is not a single sequence of this
+                environment's length, holds tokens outside the alphabet, or --
+                under a transition constraint -- is itself infeasible. An
+                infeasible anchor is refused rather than accepted because every
+                state it can reach inherits its forbidden adjacencies except by
+                accident: the environment's promise that everything it builds is
+                constructible would be void, silently, from the round it was
+                anchored onward.
+        """
+        candidate = np.asarray(parent)
+        if candidate.ndim != 1 or candidate.shape[0] != self._length:
+            raise ValueError(
+                f"a new anchor must be one sequence of length {self._length}, "
+                f"got shape {candidate.shape}"
+            )
+        if self._transitions is not None and not self._is_feasible(candidate):
+            raise ValueError(
+                "refusing to anchor at an infeasible design: it violates the "
+                "transition constraint, so the environment could no longer "
+                "guarantee that what it builds is constructible"
+            )
+        return MutationEnvironment(
+            candidate,
+            self._alphabet,
+            max_mutations=self._max_mutations,
+            transitions=self._transitions,
+            allow_stop_before_max=self._allow_stop_before_max,
+        )
+
+    def _is_feasible(self, sequence: Tokens) -> bool:
+        """Whether every adjacent token pair in one sequence is permitted.
+
+        Args:
+            sequence: A single sequence of this environment's length.
+
+        Returns:
+            ``True`` when no transition constraint is set, or when the sequence
+            satisfies it.
+        """
+        if self._transitions is None or self._length < 2:  # noqa: PLR2004 - a pair needs two
+            return True
+        permitted = self._transitions > 0
+        return bool(np.all(permitted[sequence[:-1], sequence[1:]]))
 
     def initial(self, n: int) -> State:
         """Create ``n`` trajectories sitting at the parent.

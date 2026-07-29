@@ -29,6 +29,7 @@ all, because nothing in the output says which one it is.
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -51,6 +52,16 @@ _TWO_OBJECTIVES = 2
 # An objective matrix is two-dimensional by definition.
 _MATRIX_NDIM = 2
 
+#: Elements in the largest boolean array :func:`non_dominated` will build at
+#: once, which is what bounds its memory instead of the input size. At 8 MiB of
+#: booleans a block costs less than the arrays being compared.
+_COMPARISON_BUDGET = 1 << 23
+
+#: Rows compared per block, before the budget above shrinks it further. Large
+#: blocks stop paying because the first one, which has no front to be screened
+#: against, is compared with itself in full.
+_MAX_BLOCK_ROWS = 1024
+
 
 def non_dominated(values: Fitness) -> npt.NDArray[np.bool_]:
     """Mark the designs no other design beats outright.
@@ -63,11 +74,37 @@ def non_dominated(values: Fitness) -> npt.NDArray[np.bool_]:
     Duplicated points are all kept: neither copy strictly beats the other, so
     neither is dominated. Deduplicate first if the count matters.
 
+    Why it is not the obvious all-pairs comparison
+    ----------------------------------------------
+
+    Comparing every point with every other is four lines of NumPy and
+    materialises an ``(n, n, d)`` boolean array. That is fine for a campaign's
+    few hundred measurements and impossible for a landscape: CH65's 62,926
+    measured variants would ask for roughly 12 GB, so *deriving a reference
+    front from the data that defines it* was the one thing this function could
+    not do. It now sorts once and sweeps:
+
+    #. Deduplicate. `numpy.unique` sorts the rows lexicographically as a side
+       effect, and identical rows never dominate each other, so dominance among
+       the distinct rows decides the whole answer.
+    #. Walk them in *descending* lexicographic order. If ``b`` dominates ``a``
+       then the first objective on which they differ has ``b`` above ``a``, so
+       every dominator is already behind us and nothing later in the walk can
+       overturn a verdict.
+    #. Compare each block only against the non-dominated points found so far.
+       Dominance is transitive, so a dominated point is never the only witness
+       against a later one, and the running front is all that must be kept.
+
+    The cost is ``O(n log n · d)`` to sort plus ``O(n · |front| · d)`` to sweep,
+    against ``O(n² · d)`` before, and the memory is a fixed block rather than
+    ``n²``. At 62,926 points and three objectives it is well under a second.
+
     Args:
         values: An ``(n, n_objectives)`` array of objective values.
 
     Returns:
-        An ``(n,)`` boolean array, ``True`` where the design is non-dominated.
+        An ``(n,)`` boolean array, ``True`` where the design is non-dominated,
+        in the order the points were given.
 
     Raises:
         ValueError: If ``values`` is not a two-dimensional objective matrix or
@@ -76,11 +113,76 @@ def non_dominated(values: Fitness) -> npt.NDArray[np.bool_]:
     points = _as_objective_matrix(values)
     if points.shape[0] == 0:
         return np.zeros(0, dtype=np.bool_)
-    # O(n^2 · d) and fully vectorised. Row i, column j asks whether j beats i.
-    at_least_as_good = (points[None, :, :] >= points[:, None, :]).all(axis=2)
-    strictly_better_somewhere = (points[None, :, :] > points[:, None, :]).any(axis=2)
-    dominated = (at_least_as_good & strictly_better_somewhere).any(axis=1)
-    return ~dominated
+    unique, inverse = np.unique(points, axis=0, return_inverse=True)
+    # ``unique`` is ascending; reversing it puts every dominator before what it
+    # dominates, which is what makes a single forward sweep sufficient.
+    kept = _sweep_non_dominated(unique[::-1])[::-1]
+    return np.asarray(kept[np.asarray(inverse).reshape(-1)], dtype=np.bool_)
+
+
+def _sweep_non_dominated(ordered: npt.NDArray[np.float64]) -> npt.NDArray[np.bool_]:
+    """Mark the non-dominated rows among distinct points in descending lex order.
+
+    Args:
+        ordered: A ``(k, n_objectives)`` array of *distinct* points, sorted so
+            that any dominator precedes the point it dominates.
+
+    Returns:
+        A ``(k,)`` boolean array, ``True`` where the point is non-dominated.
+    """
+    total, n_objectives = ordered.shape
+    kept = np.zeros(total, dtype=np.bool_)
+    front = np.empty((0, n_objectives), dtype=np.float64)
+    start = 0
+    while start < total:
+        rows = _block_rows(front.shape[0], total - start, n_objectives)
+        block = ordered[start : start + rows]
+        # The points are distinct, so "at least as good on every objective"
+        # already implies "strictly better somewhere": the second test the
+        # all-pairs form needed is redundant here and is not paid for.
+        if front.shape[0]:
+            alive = ~(front[None, :, :] >= block[:, None, :]).all(axis=2).any(axis=1)
+        else:
+            alive = np.ones(block.shape[0], dtype=np.bool_)
+
+        # Only survivors are compared with each other. If a block point were
+        # dominated by a block point the front had already killed, the front
+        # would dominate it too by transitivity, so it is caught above -- and
+        # the quadratic term shrinks from the block to the handful that got
+        # past the front.
+        surviving = block[alive]
+        within = (surviving[None, :, :] >= surviving[:, None, :]).all(axis=2)
+        np.fill_diagonal(within, val=False)
+        survivors = alive.copy()
+        survivors[alive] = ~within.any(axis=1)
+
+        kept[start : start + block.shape[0]] = survivors
+        # Survivors sort after everything already in the front, so they cannot
+        # dominate it: appending is enough and no re-filtering is needed.
+        front = np.concatenate([front, block[survivors]])
+        start += block.shape[0]
+    return kept
+
+
+def _block_rows(front_size: int, remaining: int, n_objectives: int) -> int:
+    """How many rows to compare at once, under `_COMPARISON_BUDGET`.
+
+    Two comparisons are built per block -- against the running front and within
+    the block itself -- and either can be the larger. The block therefore
+    shrinks as the front grows, which is what makes a pathological input, where
+    every point is non-dominated, slow rather than out of memory.
+
+    Args:
+        front_size: Non-dominated points found so far.
+        remaining: Points still to process.
+        n_objectives: Width of the objective matrix.
+
+    Returns:
+        A block size of at least one.
+    """
+    against_front = _COMPARISON_BUDGET // (max(front_size, 1) * n_objectives)
+    within_block = math.isqrt(_COMPARISON_BUDGET // n_objectives)
+    return max(1, min(remaining, _MAX_BLOCK_ROWS, against_front, within_block))
 
 
 def pareto_front(values: Fitness) -> npt.NDArray[np.float64]:

@@ -4,6 +4,7 @@ from evogfn.landscapes.base import MAX_ENUMERABLE_SIZE, FitnessLandscape
 from evogfn.landscapes.ch65 import CH65Landscape
 from evogfn.landscapes.ehrlich import EhrlichLandscape
 from evogfn.landscapes.gb1 import GB1Landscape
+from evogfn.landscapes.multi_ehrlich import MIN_OBJECTIVES, MultiEhrlichLandscape
 from evogfn.landscapes.trpb import TrpBLandscape
 from evogfn.landscapes.wrappers import (
     Budgeted,
@@ -15,6 +16,7 @@ from evogfn.landscapes.wrappers import (
 
 __all__ = [
     "MAX_ENUMERABLE_SIZE",
+    "MIN_OBJECTIVES",
     "BudgetExhaustedError",
     "Budgeted",
     "CH65Landscape",
@@ -22,6 +24,7 @@ __all__ = [
     "EhrlichLandscape",
     "FitnessLandscape",
     "GB1Landscape",
+    "MultiEhrlichLandscape",
     "Noisy",
     "SelectionNoisy",
     "TrpBLandscape",

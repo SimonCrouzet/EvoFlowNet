@@ -11,22 +11,30 @@ distribution.
 Defaults follow Jain et al. (ICML 2022): UCB with ``kappa = 0.1``. That is a
 notably small weight -- close to greedy -- and worth knowing when reading their
 results.
+
+All four rank a scalar, and
+[ScalarizedAcquisition][evogfn.acquisition.rules.ScalarizedAcquisition] is what
+lets them be used at all when the landscape returns a vector. It is the only
+rule here that declares `Acquisition.supports_multi_objective`; every other one
+refuses an objective vector rather than ranking on a component of it.
 """
 
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 import numpy as np
 
 from evogfn.acquisition.base import Acquisition, BatchSelector
 from evogfn.metrics.diversity import hamming_distances
+from evogfn.rewards.scalarization import PREFERENCE_SUM_TOLERANCE
 
 if TYPE_CHECKING:
     import numpy.typing as npt
 
-    from evogfn.core.types import Tokens
+    from evogfn.core.types import Fitness, Tokens
+    from evogfn.rewards.scalarization import Scalarization
 
 #: Exploration weight used by Jain et al.
 DEFAULT_KAPPA = 0.1
@@ -47,10 +55,10 @@ class Greedy(Acquisition):
     artefact of where it happened to extrapolate high.
     """
 
-    def score(
+    def _score(
         self,
-        mean: npt.NDArray[np.floating],
-        std: npt.NDArray[np.floating],  # noqa: ARG002 - ignored by definition
+        mean: npt.NDArray[np.float64],
+        std: npt.NDArray[np.float64],  # noqa: ARG002 - ignored by definition
         *,
         best_observed: float,  # noqa: ARG002 - ignored by definition
     ) -> npt.NDArray[np.floating]:
@@ -79,10 +87,10 @@ class UpperConfidenceBound(Acquisition):
         """Weight on uncertainty."""
         return self._kappa
 
-    def score(
+    def _score(
         self,
-        mean: npt.NDArray[np.floating],
-        std: npt.NDArray[np.floating],
+        mean: npt.NDArray[np.float64],
+        std: npt.NDArray[np.float64],
         *,
         best_observed: float,  # noqa: ARG002 - not an improvement rule
     ) -> npt.NDArray[np.floating]:
@@ -101,10 +109,10 @@ class ExpectedImprovement(Acquisition):
     out of how far the candidate sits above the incumbent.
     """
 
-    def score(
+    def _score(
         self,
-        mean: npt.NDArray[np.floating],
-        std: npt.NDArray[np.floating],
+        mean: npt.NDArray[np.float64],
+        std: npt.NDArray[np.float64],
         *,
         best_observed: float,
     ) -> npt.NDArray[np.floating]:
@@ -133,16 +141,174 @@ class Thompson(Acquisition):
         """Seed the sampler."""
         self._rng = np.random.default_rng(seed)
 
-    def score(
+    def _score(
         self,
-        mean: npt.NDArray[np.floating],
-        std: npt.NDArray[np.floating],
+        mean: npt.NDArray[np.float64],
+        std: npt.NDArray[np.float64],
         *,
         best_observed: float,  # noqa: ARG002 - not an improvement rule
     ) -> npt.NDArray[np.floating]:
         """Draw one sample per candidate."""
         return self._rng.normal(
             np.asarray(mean, dtype=np.float64), np.asarray(std, dtype=np.float64)
+        )
+
+
+class ScalarizedAcquisition(Acquisition):
+    r"""Rank a multi-objective problem by one stated trade-off.
+
+    Wraps any scalar rule and gives it the two things it is missing when the
+    landscape returns a vector: a way to turn measured objective vectors into
+    the incumbent it improves on, and a way to turn a vector-valued prediction
+    into the number it ranks. Both go through the same
+    [Scalarization][evogfn.rewards.scalarization.Scalarization] and the same
+    preference $\omega$, which is the point -- the surrogate is fitted to
+    $s(R(x) \mid \omega)$, the incumbent is the best measured $s$, and the
+    ranking is over predicted $s$. A campaign that scalarised in one place and
+    ranked in another would be optimising a trade-off it never reports.
+
+    ## Why this route and not expected hypervolume improvement
+
+    EHVI (Emmerich et al., 2006; Daulton et al., 2020) needs no preference at
+    all: it scores a candidate by how much volume it would add to the incumbent
+    Pareto front, so it targets the whole front rather than one point on it, and
+    it is the honest answer to "which batch improves the *set*". Two things
+    stand between this package and it.
+
+    * It needs a predictive distribution **per objective**. Every
+      [Surrogate][evogfn.surrogate.base.Surrogate] here returns one mean and one
+      spread per sequence, so there is no joint predictive to integrate.
+    * Its cost is the cost of a hypervolume, once per candidate. The exact
+      method in [evogfn.metrics.pareto][] is inclusion--exclusion over the
+      front, $2^k$ terms for a $k$-point front, and the pool is 2,048 candidates
+      *every round*. A front of 20 measured designs -- ordinary on CH65 -- puts
+      that at two billion box intersections per round, which is why the box
+      decompositions in the literature exist and why bolting an approximation
+      into this loop would produce a number nothing downstream could tell apart
+      from an exact one.
+
+    What EHVI would have bought, concretely, is coverage: this rule can only
+    ever find the part of the front its $\omega$ points at, and with
+    [WeightedSum][evogfn.rewards.scalarization.WeightedSum] it cannot reach a
+    concave part of the front at any $\omega$ (Miettinen, 1999, Thm 3.1.4).
+    Sweeping $\omega$ across seeds recovers some of that; it is not the same
+    thing, and results should say which was run.
+
+    ## The spread it hands the inner rule
+
+    A scalarisation of the means says nothing about the spread of the
+    scalarised value, and improvement rules need one. This takes
+
+    $$\sigma_s(x) = \max\bigl(s(\mu(x) + \sigma(x) \mid \omega)
+    - s(\mu(x) \mid \omega),\ 0\bigr)$$
+
+    -- the scalarised value of a one-standard-deviation upside, less the
+    scalarised mean. For [WeightedSum][evogfn.rewards.scalarization.WeightedSum]
+    that is exactly $\sum_i \omega_i \sigma_i$, which is the *perfectly
+    correlated* case rather than the independent $\sqrt{\sum_i \omega_i^2
+    \sigma_i^2}$: it overstates the spread when objectives are independent, and
+    overstating a surrogate's uncertainty errs towards exploration rather than
+    towards confident nonsense. For a non-linear scalarisation it is a
+    first-order estimate, and it is non-negative for any scalarisation monotone
+    in each objective, which all three here are.
+
+    Args:
+        rule: The scalar rule that does the ranking.
+        scalarization: How objectives are combined.
+        preference: The ``(n_objectives,)`` preference vector, non-negative and
+            summing to one.
+
+    Raises:
+        ValueError: If the preference is not a one-dimensional, finite,
+            non-negative vector summing to one.
+    """
+
+    supports_multi_objective: ClassVar[bool] = True
+
+    def __init__(
+        self,
+        rule: Acquisition,
+        scalarization: Scalarization,
+        preference: npt.ArrayLike,
+    ) -> None:
+        """Store the inner rule and the trade-off it will rank under."""
+        weights = np.asarray(preference, dtype=np.float64)
+        if weights.ndim != 1 or weights.size == 0:
+            raise ValueError(
+                f"expected a preference vector of shape (n_objectives,), got {weights.shape}"
+            )
+        if not np.isfinite(weights).all():
+            raise ValueError("preference must be finite")
+        if (weights < 0.0).any():
+            raise ValueError(
+                f"preference must be non-negative, got a minimum of {weights.min()}; a "
+                f"negative weight turns an objective into something to be minimised"
+            )
+        if abs(float(weights.sum()) - 1.0) > PREFERENCE_SUM_TOLERANCE:
+            raise ValueError(
+                f"preference must sum to 1, got {weights.sum()}; an unnormalised "
+                f"preference rescales the ranking as well as tilting it"
+            )
+        self._rule = rule
+        self._scalarization = scalarization
+        self._preference = weights
+
+    @property
+    def rule(self) -> Acquisition:
+        """The scalar rule doing the ranking."""
+        return self._rule
+
+    @property
+    def scalarization(self) -> Scalarization:
+        """How the objectives are combined."""
+        return self._scalarization
+
+    @property
+    def preference(self) -> npt.NDArray[np.float64]:
+        """The preference vector, as a copy so it cannot be mutated."""
+        return self._preference.copy()
+
+    def reduce_objectives(self, values: Fitness) -> npt.NDArray[np.float64]:
+        """Scalarise measured objective vectors under the stored preference.
+
+        Args:
+            values: An ``(n, n_objectives)`` array of measurements.
+
+        Returns:
+            An ``(n,)`` array of scalarised values.
+
+        Raises:
+            ValueError: If ``values`` is not a two-dimensional objective matrix,
+                contains ``nan``, or has a width the preference does not match.
+        """
+        return self._scalarization.scalarize(values, self._preference)
+
+    def _score(
+        self,
+        mean: npt.NDArray[np.float64],
+        std: npt.NDArray[np.float64],
+        *,
+        best_observed: float,
+    ) -> npt.NDArray[np.floating]:
+        """Scalarise the prediction, then hand it to the inner rule.
+
+        A prediction that is already one value per candidate is passed straight
+        through: a single-output surrogate has, in effect, already been fitted
+        to the scalarised target, and scalarising it twice would apply the
+        preference to a number that is not an objective vector.
+        """
+        if mean.ndim == 1:
+            return self._rule.score(mean, std, best_observed=best_observed)
+        value = self._scalarization.scalarize(mean, self._preference)
+        upside = self._scalarization.scalarize(mean + std, self._preference)
+        spread = np.maximum(upside - value, 0.0)
+        return self._rule.score(value, spread, best_observed=best_observed)
+
+    def __repr__(self) -> str:
+        """Name the inner rule, the scalarisation and the preference."""
+        return (
+            f"ScalarizedAcquisition({self._rule!r}, {self._scalarization!r}, "
+            f"{np.array2string(self._preference, precision=3)})"
         )
 
 
