@@ -40,7 +40,7 @@ noise.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 import numpy as np
 
@@ -71,6 +71,16 @@ class LandscapeWrapper(FitnessLandscape):
     Args:
         landscape: The landscape to wrap.
     """
+
+    #: Whether repeating a call can return a different answer. :class:`Cached`
+    #: refuses anything that declares itself stochastic, since caching freezes
+    #: the first measurement of each sequence and turns a noise model into a
+    #: lookup table. Declared as a marker rather than checked with an isinstance
+    #: tuple in :class:`Cached`, because a tuple has to be edited every time a
+    #: noise model is added and nothing fails when it is not -- the new wrapper
+    #: is simply cacheable, and the resulting numbers look ordinary. A class that
+    #: draws randomly sets this to ``True`` beside the code that draws.
+    stochastic: ClassVar[bool] = False
 
     def __init__(self, landscape: FitnessLandscape) -> None:
         """Store the wrapped landscape."""
@@ -151,6 +161,8 @@ class Noisy(LandscapeWrapper):
             realistic, and silently clipping would make regret look better than
             it is.
     """
+
+    stochastic: ClassVar[bool] = True
 
     def __init__(
         self,
@@ -237,9 +249,10 @@ class SelectionNoisy(LandscapeWrapper):
         enrichment assays and is deliberately not corrected.
 
     Note:
-        :class:`Cached` rejects :class:`Noisy` but does not reject this class.
-        Caching it has the same effect -- the first measurement of each sequence
-        is frozen forever -- and is very probably a mistake.
+        :class:`Cached` rejects this class for the same reason it rejects
+        :class:`Noisy`: caching freezes the first measurement of each sequence
+        forever, and here that would remove precisely the fitness-dependent
+        error the wrapper exists to produce.
 
     Args:
         landscape: The landscape to wrap.
@@ -265,6 +278,8 @@ class SelectionNoisy(LandscapeWrapper):
             >>> truth = EhrlichLandscape(seed=0)
             >>> assay = SelectionNoisy.calibrated(truth, top_fitness=1.0, seed=1)
     """
+
+    stochastic: ClassVar[bool] = True
 
     def __init__(  # noqa: PLR0913 - an assay is defined by its selection and its depth
         self,
@@ -508,7 +523,8 @@ class Cached(LandscapeWrapper):
     class: see the module docstring.
 
     Note:
-        Caching a :class:`Noisy` landscape freezes the first measurement of each
+        Caching a stochastic landscape -- :class:`Noisy`, :class:`SelectionNoisy`
+        or anything else that draws -- freezes the first measurement of each
         sequence and returns it forever, which removes exactly the repeated
         sampling that makes noise interesting. That combination is almost
         certainly a mistake, so the constructor rejects it.
@@ -522,11 +538,15 @@ class Cached(LandscapeWrapper):
 
     def __init__(self, landscape: FitnessLandscape) -> None:
         """Wrap a landscape with a result cache."""
-        if isinstance(landscape, Noisy):
+        # Asked of the landscape rather than tested against a list of noise
+        # classes: a list is a thing to forget, and forgetting it is silent --
+        # see LandscapeWrapper.stochastic. getattr, so a landscape that is not a
+        # wrapper can declare itself stochastic too.
+        if bool(getattr(landscape, "stochastic", False)):
             raise ValueError(
-                "caching a Noisy landscape would freeze the first measurement of each "
-                "sequence, defeating the noise; wrap the other way round if you meant "
-                "to cache the underlying truth"
+                f"caching a {type(landscape).__name__} landscape would freeze the first "
+                f"measurement of each sequence, defeating the noise; wrap the other way "
+                f"round if you meant to cache the underlying truth"
             )
         super().__init__(landscape)
         self._cache: dict[bytes, npt.NDArray[np.float64]] = {}

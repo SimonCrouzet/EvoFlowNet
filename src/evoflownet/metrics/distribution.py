@@ -51,9 +51,10 @@ def target_distribution(
 
     Raises:
         ValueError: If no design has positive reward, in which case the target
-            is undefined.
+            is undefined, or if the values carry more than one objective, in
+            which case ``R(x)`` is not yet a number.
     """
-    flat = np.asarray(values, dtype=np.float64).reshape(-1)
+    flat = _single_objective(values)
     rewards = np.where(np.isfinite(flat) & (flat > 0.0), flat, min_reward)
     if not (rewards > 0.0).any():
         raise ValueError(
@@ -159,3 +160,28 @@ def expected_l1_from_sampling_noise(
         counts = rng.multinomial(n_samples, probabilities) / n_samples
         distances.append(np.abs(counts - probabilities).sum())
     return float(np.mean(distances))
+
+
+def _single_objective(values: Fitness) -> npt.NDArray[np.float64]:
+    """Accept ``(n,)`` or single-objective ``(n, 1)`` and return ``(n,)``.
+
+    Args:
+        values: Objective values for every sequence in the space.
+
+    Returns:
+        An ``(n,)`` array, one value per enumerated sequence.
+
+    Raises:
+        ValueError: If the input has more than one objective. Flattening would
+            return ``n * n_objectives`` probabilities against an ``n``-sequence
+            enumeration, and every comparison downstream would misalign.
+    """
+    array = np.asarray(values, dtype=np.float64)
+    if array.ndim == 1:
+        return array
+    if array.ndim == 2 and array.shape[1] == 1:  # noqa: PLR2004 - a single objective
+        return array[:, 0]
+    raise ValueError(
+        f"expected shape (n,) or (n, 1), got {array.shape}; multi-objective values "
+        f"must be scalarised before a single target distribution exists"
+    )

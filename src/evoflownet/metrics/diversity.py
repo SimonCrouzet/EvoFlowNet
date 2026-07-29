@@ -131,11 +131,12 @@ def distinct_modes(
         The number of distinct modes found.
 
     Raises:
-        ValueError: If the inputs disagree in length, or ``min_distance`` is not
-            positive.
+        ValueError: If the inputs disagree in length, if ``min_distance`` is not
+            positive, or if the values carry more than one objective, which no
+            single ``threshold`` can be compared against.
     """
     array = np.asarray(sequences)
-    scores = np.asarray(values, dtype=np.float64).reshape(-1)
+    scores = _single_objective(values)
     if array.shape[0] != scores.shape[0]:
         raise ValueError(
             f"got {array.shape[0]} sequences and {scores.shape[0]} values; they must match"
@@ -155,3 +156,30 @@ def distinct_modes(
         if hamming_distances(candidate, modes).min() >= min_distance:
             modes = np.concatenate([modes, candidate])
     return int(modes.shape[0])
+
+
+def _single_objective(values: npt.NDArray[np.floating]) -> npt.NDArray[np.float64]:
+    """Accept ``(n,)`` or single-objective ``(n, 1)`` and return ``(n,)``.
+
+    Args:
+        values: Objective values for the scored sequences.
+
+    Returns:
+        An ``(n,)`` array aligned with the sequences.
+
+    Raises:
+        ValueError: If the input has more than one objective. Flattening would
+            give ``n * n_objectives`` scores against ``n`` sequences, which the
+            caller would then read as a length mismatch rather than as the
+            missing scalarisation it actually is.
+    """
+    array = np.asarray(values, dtype=np.float64)
+    if array.ndim == 1:
+        return array
+    if array.ndim == 2 and array.shape[1] == 1:  # noqa: PLR2004 - a single objective
+        return array[:, 0]
+    raise ValueError(
+        f"expected shape (n,) or (n, 1), got {array.shape}; multi-objective values "
+        f"must be scalarised before a single mode threshold applies -- to count "
+        f"non-dominated designs instead, see evoflownet.metrics.pareto"
+    )

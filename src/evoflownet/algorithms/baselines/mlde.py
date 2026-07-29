@@ -61,6 +61,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from evoflownet.algorithms.base import Sampler
+from evoflownet.algorithms.baselines._values import single_objective
 from evoflownet.algorithms.baselines.mutagenesis import RandomMutagenesis
 
 if TYPE_CHECKING:
@@ -207,8 +208,12 @@ class MLDE(Sampler):
         Args:
             sequences: The evaluated candidates.
             values: An ``(n, 1)`` array of their objective values.
+
+        Raises:
+            ValueError: If the values carry more than one objective, which the
+                single-output surrogate has no target to regress on.
         """
-        flat = np.asarray(values, dtype=np.float64).reshape(-1)
+        flat = single_objective(values)
         rows = np.ascontiguousarray(np.asarray(sequences))
         for row, value in zip(rows, flat, strict=False):
             self._measured.add(row.tobytes())

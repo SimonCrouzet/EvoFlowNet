@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from evoflownet.algorithms.base import Sampler
+from evoflownet.algorithms.baselines._values import single_objective
 
 if TYPE_CHECKING:
     from evoflownet.core.types import Fitness, Tokens
@@ -195,8 +196,12 @@ class SimulatedAnnealing(Sampler):
         Args:
             sequences: The evaluated candidates.
             values: An ``(n, 1)`` array of their objective values.
+
+        Raises:
+            ValueError: If the values carry more than one objective, which the
+                Metropolis test has no scalar delta for.
         """
-        flat = np.asarray(values, dtype=np.float64).reshape(-1)
+        flat = single_objective(values)
         candidates = np.asarray(sequences)
 
         for row, value in zip(candidates, flat, strict=False):
