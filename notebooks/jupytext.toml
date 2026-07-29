@@ -1,0 +1,21 @@
+# These notebooks are stored as .py "percent" scripts rather than .ipynb.
+#
+# Three reasons, in order of how often they matter:
+#
+#  * they diff. A review of an .ipynb is a review of base64 and execution
+#    counts; a review of one of these is a review of the change;
+#  * they run. `python notebooks/03-gflownet-from-scratch.py` executes the whole
+#    thing, which is what CI does, so a notebook that has silently rotted fails
+#    a build instead of failing a reader;
+#  * they lint. Ruff checks them alongside `src/` under the same rules.
+#
+# Open one in Jupyter with jupytext installed and it appears as a notebook.
+# Without it, `jupytext --to notebook notebooks/01-*.py` writes an .ipynb.
+# Deliberately *not* paired to .ipynb on disk: a checked-in .ipynb would
+# reintroduce exactly the diff noise the format was chosen to avoid.
+formats = "py:percent"
+
+# Strip Jupyter's bookkeeping when converting back, so a round trip through a
+# notebook does not leave kernel names and execution counts in the .py file.
+notebook_metadata_filter = "-all"
+cell_metadata_filter = "-all"

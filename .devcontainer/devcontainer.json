@@ -1,0 +1,92 @@
+{
+  // Zero-install onboarding: open this repository in VS Code or a GitHub
+  // Codespace and the environment builds itself. No local Python, no local uv,
+  // and no argument about which torch build got installed.
+  //
+  // The container deliberately installs the CPU build. A Codespace has no GPU,
+  // and the CUDA wheels are 4.7GB against 1.1GB -- paying that to sit unused is
+  // the single largest thing that would make first-run experience bad.
+  "name": "EvoFlowNet",
+
+  // Matches the project's mypy target and sits inside the supported 3.11-3.13
+  // range. The CI matrix is what guarantees the other two still work.
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
+
+  "features": {
+    // uv from its own feature rather than a pip install, so the container gets
+    // the same tool the README and CONTRIBUTING assume.
+    "ghcr.io/va-h/devcontainers-features/uv:1": {
+      "shellAutocompletion": true
+    },
+    "ghcr.io/devcontainers/features/git:1": {}
+  },
+
+  "containerEnv": {
+    // The default hardlink strategy fails across the container's overlay
+    // filesystem and falls back with a warning on every install.
+    "UV_LINK_MODE": "copy",
+    // Keep the environment out of the bind-mounted workspace: a 1.1GB venv on
+    // a mounted volume is slow to create and slower to import from.
+    "UV_PROJECT_ENVIRONMENT": "/opt/venv",
+    // uv manages its own interpreters; do not let it silently pick another.
+    "UV_PYTHON_DOWNLOADS": "never"
+  },
+
+  // --locked fails if uv.lock is out of step with pyproject.toml rather than
+  // silently re-resolving, so the container is built against the dependency set
+  // that was actually committed. The docs group is included because the docs
+  // are part of what a newcomer is here to read and edit.
+  "postCreateCommand": "uv sync --extra cpu --group dev --group docs --locked && uv run pre-commit install",
+
+  // Say something true and short once the environment is ready, rather than
+  // leaving a newcomer to guess which command produces output.
+  "postAttachCommand": "echo 'Ready. Try: uv run python notebooks/01-landscapes-and-epistasis.py  |  uv run pytest -m \"not slow\"  |  uv run mkdocs serve'",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-toolsai.jupyter",
+        // Opens notebooks/*.py as notebooks. Without it the percent scripts
+        // still run as plain Python, which is the point of the format.
+        "congyiwu.vscode-jupytext",
+        "charliermarsh.ruff",
+        "ms-python.mypy-type-checker",
+        "tamasfe.even-better-toml"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/opt/venv/bin/python",
+        "python.terminal.activateEnvironment": false,
+        "editor.formatOnSave": true,
+        "editor.rulers": [100],
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff",
+          "editor.codeActionsOnSave": {
+            "source.organizeImports": "explicit"
+          }
+        },
+        "files.trimTrailingWhitespace": true,
+        "files.insertFinalNewline": true
+      }
+    }
+  },
+
+  // Codespaces defaults to 2 cores, which makes the test suite and any campaign
+  // painful. Ask for more; a smaller machine still works, just slower.
+  "hostRequirements": {
+    "cpus": 4,
+    "memory": "8gb",
+    "storage": "32gb"
+  },
+
+  // mkdocs serve
+  "forwardPorts": [8000],
+  "portsAttributes": {
+    "8000": {
+      "label": "docs (mkdocs serve)",
+      "onAutoForward": "notify"
+    }
+  },
+
+  "remoteUser": "vscode"
+}
