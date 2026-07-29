@@ -131,7 +131,8 @@ class SequenceEnvironment(ABC):
         """Which actions could have produced each trajectory's current state.
 
         This is what ``P_B`` is a distribution over, so it must describe exactly
-        the same edges as :meth:`forward_mask` traversed in reverse.
+        the same edges as [forward_mask][evogfn.env.base.SequenceEnvironment.forward_mask] traversed
+        in reverse.
 
         Args:
             state: The current state.

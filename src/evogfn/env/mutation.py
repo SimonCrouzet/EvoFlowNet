@@ -57,6 +57,11 @@ if TYPE_CHECKING:
 
     from evogfn.core.types import Alphabet, Tokens
 
+# How many outgoing edges the forward search expands per call. The frontier of a
+# large graph has more edges than fit comfortably in one array, and the walk is
+# breadth-first regardless of how the work is split.
+_SEARCH_BATCH = 4096
+
 
 class MutationEnvironment(SequenceEnvironment):
     """Builds variants by applying point mutations to a fixed parent.
@@ -376,21 +381,33 @@ class MutationEnvironment(SequenceEnvironment):
         return State(sequences=sequences, stopped=stopped)
 
     def enumerate_terminal_states(self) -> Tokens:
-        """Every sequence reachable from the parent.
+        """Every sequence within the mutation budget of the parent.
 
-        The reachable set is the Hamming ball of radius ``max_mutations`` around
-        the parent, not the whole sequence space -- which matters for any exact
-        distributional comparison, since the target must be normalised over what
-        the environment can actually produce rather than over everything that
-        exists. Feasibility masking shrinks it further, so this is an upper
-        bound when a transition matrix is in use.
+        This is the Hamming ball of radius ``max_mutations``. It is the set the
+        environment can construct only when nothing constrains the edges -- no
+        transition matrix, and early stopping allowed. Otherwise it overstates the
+        support in two separate ways:
+
+        * A transition matrix masks substitutions out, so the ball contains
+          sequences no trajectory can build. Not only infeasible ones: also
+          *feasible* sequences whose every construction order passes through an
+          infeasible intermediate.
+        * With ``allow_stop_before_max`` false, the ball contains partial
+          constructions that are states of the graph but never terminal states.
+
+        Either way, normalising a target distribution over the ball puts mass on
+        sequences of probability zero, and the L1 that results measures the
+        mis-specified support rather than the policy -- loudly enough to read as a
+        broken sampler. Use :meth:`reachable_terminal_states` whenever a
+        transition matrix is set or early stopping is forbidden; this method is
+        the cheap closed-form answer for the unconstrained case, and an upper
+        bound otherwise.
 
         Returns:
-            An ``(m, length)`` array of distinct reachable sequences, the parent
-            first.
+            An ``(m, length)`` array of distinct sequences, the parent first.
 
         Raises:
-            ValueError: If the reachable set exceeds
+            ValueError: If the ball exceeds
             :data:`~evogfn.landscapes.base.MAX_ENUMERABLE_SIZE`.
         """
         from itertools import combinations, product  # noqa: PLC0415 - only needed here
@@ -401,10 +418,7 @@ class MutationEnvironment(SequenceEnvironment):
             [t for t in range(self._alphabet.size) if t != int(self._parent[position])]
             for position in range(self._length)
         ]
-        size = sum(
-            math.comb(self._length, k) * (self._alphabet.size - 1) ** k
-            for k in range(self._max_mutations + 1)
-        )
+        size = self._hamming_ball_size()
         if size > MAX_ENUMERABLE_SIZE:
             raise ValueError(
                 f"{size:,} sequences are reachable, above the "
@@ -419,6 +433,99 @@ class MutationEnvironment(SequenceEnvironment):
                     variant[list(positions)] = tokens
                     reachable.append(variant)
         return np.stack(reachable)
+
+    def reachable_terminal_states(self) -> Tokens:
+        """Every terminal state a trajectory can actually end in.
+
+        This is the support of the policy: the set an exact distributional
+        comparison must be normalised over. It is found by walking the graph
+        forward from the parent using this environment's own :meth:`forward_mask`
+        and :meth:`step`, which makes it the reachable set by construction. A
+        second implementation that re-derived reachability from ``transitions``
+        could disagree with the masks, and then the measurement would be wrong in
+        a way no test of the constraint alone would catch.
+
+        Filtering :meth:`enumerate_terminal_states` through :meth:`is_reachable`
+        is *not* equivalent, and that is the whole reason this method exists.
+        Mutations are applied one at a time, so a variant carrying ``k`` of them
+        is constructible only if some ordering exists along which all ``k``
+        intermediates are feasible too. When every ordering passes through a
+        forbidden adjacency, masking refuses that step in all of them and no path
+        to the destination exists -- even though the destination itself is
+        perfectly feasible and satisfies :meth:`is_reachable`. On a length-8
+        Ehrlich toy with a transition matrix and a budget of two mutations, the
+        Hamming ball holds 277 sequences, 26 of them feasible, and 18 reachable:
+        eight feasible designs the policy can never emit.
+
+        Terminality is read from the mask rather than from the mutation count, so
+        the result also respects ``allow_stop_before_max``: where stopping early
+        is forbidden, partial constructions are visited during the search but only
+        states that may stop are returned.
+
+        Returns:
+            An ``(m, length)`` array of distinct terminal sequences in
+            breadth-first order, so the parent comes first where it is terminal.
+
+        Raises:
+            ValueError: If the Hamming ball exceeds
+            :data:`~evogfn.landscapes.base.MAX_ENUMERABLE_SIZE`. The search visits
+            a subset of the ball, so refusing up front on that bound means the
+            walk itself can never exhaust memory, at the cost of refusing some
+            heavily constrained graphs that would in fact have been small.
+        """
+        from evogfn.landscapes.base import MAX_ENUMERABLE_SIZE  # noqa: PLC0415
+
+        size = self._hamming_ball_size()
+        if size > MAX_ENUMERABLE_SIZE:
+            raise ValueError(
+                f"the search would visit up to {size:,} sequences, above the "
+                f"{MAX_ENUMERABLE_SIZE:,} enumeration limit"
+            )
+
+        terminal: list[Tokens] = []
+        visited = {self._parent.tobytes()}
+        frontier = self._parent[None, :].copy()
+        while frontier.shape[0]:
+            mask = self.forward_mask(
+                State(sequences=frontier, stopped=np.zeros(frontier.shape[0], dtype=np.bool_))
+            )
+            terminal.extend(frontier[np.nonzero(mask[:, self.stop_action])[0]])
+
+            # Every forward substitution raises the mutation count by one, so a
+            # state first seen in this layer is never reached again from a later
+            # one and dropping duplicates here loses no edges worth walking.
+            rows, actions = np.nonzero(mask[:, : self.n_mutation_actions])
+            discovered: list[Tokens] = []
+            for start in range(0, rows.size, _SEARCH_BATCH):
+                block = slice(start, start + _SEARCH_BATCH)
+                sources = State(
+                    sequences=frontier[rows[block]],
+                    stopped=np.zeros(rows[block].size, dtype=np.bool_),
+                )
+                for child in self.step(sources, actions[block]).sequences:
+                    key = child.tobytes()
+                    if key not in visited:
+                        visited.add(key)
+                        discovered.append(child)
+            frontier = (
+                np.stack(discovered)
+                if discovered
+                else np.empty((0, self._length), dtype=self._parent.dtype)
+            )
+
+        return np.stack(terminal)
+
+    def _hamming_ball_size(self) -> int:
+        """How many sequences lie within the mutation budget of the parent.
+
+        Returns:
+            The size of the Hamming ball of radius ``max_mutations``, counted in
+            closed form rather than by enumeration so it can gate enumeration.
+        """
+        return sum(
+            math.comb(self._length, k) * (self._alphabet.size - 1) ** k
+            for k in range(self._max_mutations + 1)
+        )
 
     def log_n_trajectories(self, state: State) -> npt.NDArray[np.float64]:
         """Log of how many distinct paths reach each state from the parent.
