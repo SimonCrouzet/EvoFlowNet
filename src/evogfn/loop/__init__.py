@@ -5,6 +5,8 @@ from evogfn.loop.campaign import (
     DEFAULT_POOL_SIZE,
     DEFAULT_ROUNDS,
     Campaign,
+    StatesReferenceFront,
+    StatesReferencePoint,
 )
 from evogfn.loop.ledger import CampaignResult, RoundRecord
 
@@ -15,4 +17,6 @@ __all__ = [
     "Campaign",
     "CampaignResult",
     "RoundRecord",
+    "StatesReferenceFront",
+    "StatesReferencePoint",
 ]

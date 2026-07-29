@@ -460,3 +460,106 @@ class TestBatching:
 
     def test_state_length_is_the_batch_size(self):
         assert len(make_env().initial(7)) == 7
+
+
+class TestReanchoring:
+    """Moving the anchor is what makes a campaign go further than one round.
+
+    An environment is one Hamming ball. Held at the wild type it caps a whole
+    campaign at a single round's mutation budget, which is why a planted optimum
+    tens of mutations away is unreachable however many rounds are run. These
+    check that the new ball is genuinely a new ball, that the old one is
+    untouched, and that nothing about feasibility is lost on the way.
+    """
+
+    def test_the_new_environment_is_anchored_at_the_new_parent(self):
+        env = make_env(length=4, symbols="ABC", max_mutations=2)
+        moved = env.reanchored(np.array([1, 1, 0, 0]))
+        assert moved.parent.tolist() == [1, 1, 0, 0]
+
+    def test_the_original_is_left_where_it_was(self):
+        # Samplers and policies hold a reference to the environment they were
+        # built against. Moving the anchor under one of them would change every
+        # mask it reads without raising anything.
+        env = make_env(length=4, symbols="ABC", max_mutations=2)
+        env.reanchored(np.array([1, 1, 0, 0]))
+        assert env.parent.tolist() == [0, 0, 0, 0]
+        assert env.initial(1).sequences[0].tolist() == [0, 0, 0, 0]
+
+    def test_the_settings_carry_over(self):
+        matrix = transitions_forbidding(3, [(0, 1)])
+        env = make_env(
+            length=4, symbols="ABC", max_mutations=2, transitions=matrix, allow_stop=False
+        )
+        moved = env.reanchored(np.array([2, 2, 0, 0]))
+        assert moved.max_mutations == env.max_mutations
+        assert moved.alphabet == env.alphabet
+        assert moved.n_actions == env.n_actions
+        # allow_stop_before_max is not public; its effect is that every terminal
+        # state carries exactly the budget, which is what is actually checked.
+        assert all(
+            int((row != moved.parent).sum()) == moved.max_mutations
+            for row in moved.reachable_terminal_states()
+        )
+
+    def test_the_budget_is_measured_from_the_new_parent(self):
+        env = make_env(length=4, symbols="ABC", max_mutations=1)
+        moved = env.reanchored(np.array([1, 1, 0, 0]))
+        # Two mutations from the wild type, none from the new anchor.
+        assert moved.is_reachable(np.array([[1, 1, 0, 0]]))[0]
+        # One from the new anchor, three from the wild type.
+        assert moved.is_reachable(np.array([[1, 1, 1, 0]]))[0]
+        assert not moved.is_reachable(np.array([[1, 1, 1, 1]]))[0]
+        assert not env.is_reachable(np.array([[1, 1, 0, 0]]))[0]
+
+    def test_it_reaches_designs_the_original_could_not(self):
+        # The whole point: two rounds of a one-mutation budget reach two
+        # mutations from the wild type, which one environment never does.
+        env = make_env(length=4, symbols="ABC", max_mutations=1)
+        first = as_set(env.reachable_terminal_states())
+        second = as_set(env.reanchored(np.array([1, 0, 0, 0])).reachable_terminal_states())
+        assert (1, 1, 0, 0) not in first
+        assert (1, 1, 0, 0) in second
+
+    def test_every_state_it_reaches_is_still_feasible(self):
+        matrix = transitions_forbidding(4, [(0, 1), (1, 2), (2, 3), (3, 0), (1, 1)])
+        env = make_env(length=5, symbols="ABCD", max_mutations=2, transitions=matrix)
+        moved = env.reanchored(np.array([0, 0, 2, 0, 0]))
+        permitted = matrix > 0
+        reached = moved.reachable_terminal_states()
+        assert reached.shape[0] > 0
+        for sequence in reached:
+            assert all(
+                permitted[sequence[position], sequence[position + 1]]
+                for position in range(len(sequence) - 1)
+            )
+
+    def test_an_infeasible_anchor_is_refused(self):
+        # Anchoring here would make every state the environment builds inherit a
+        # forbidden adjacency, and nothing downstream would notice.
+        matrix = transitions_forbidding(3, [(0, 1)])
+        env = make_env(length=4, symbols="ABC", max_mutations=2, transitions=matrix)
+        with pytest.raises(ValueError, match="infeasible design"):
+            env.reanchored(np.array([0, 1, 0, 0]))
+
+    def test_a_batch_is_not_an_anchor(self):
+        env = make_env(length=4, symbols="ABC")
+        with pytest.raises(ValueError, match="one sequence of length 4"):
+            env.reanchored(np.array([[0, 1, 0, 0]]))
+
+    def test_a_different_length_is_refused(self):
+        env = make_env(length=4, symbols="ABC")
+        with pytest.raises(ValueError, match="one sequence of length 4"):
+            env.reanchored(np.array([0, 1, 0]))
+
+    def test_tokens_outside_the_alphabet_are_refused(self):
+        env = make_env(length=4, symbols="ABC")
+        with pytest.raises(ValueError, match=r"lie in \[0, 3\)"):
+            env.reanchored(np.array([0, 7, 0, 0]))
+
+    def test_the_anchor_is_copied_rather_than_held(self):
+        env = make_env(length=4, symbols="ABC")
+        design = np.array([1, 1, 0, 0])
+        moved = env.reanchored(design)
+        design[0] = 2
+        assert moved.parent.tolist() == [1, 1, 0, 0]

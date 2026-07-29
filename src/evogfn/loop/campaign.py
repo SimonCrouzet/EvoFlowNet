@@ -33,6 +33,33 @@ surrogate is constructed with *the same surrogate instance* the campaign holds.
 Refitting mutates it in place, so the sampler sees each round's model without
 the campaign needing to know which samplers care.
 
+Re-anchoring between rounds
+---------------------------
+
+A [MutationEnvironment][evogfn.env.mutation.MutationEnvironment] searches within
+``max_mutations`` of the design it is anchored to. Hold that anchor at the wild
+type for the whole campaign and every round re-searches the same Hamming ball:
+four rounds of a four-mutation budget still reach only four mutations from the
+wild type, not sixteen. That is not what directed evolution does. Each real round
+starts from the best variant the last one produced, and cumulative distance grows
+while the per-round budget does not.
+
+The difference is not a matter of degree. On this repository's Ehrlich tasks the
+planted optimum lies 61-248 mutations from the wild type against a per-round
+budget of four, so under a fixed anchor no method can reach it *in principle* --
+and a regret reported against it is a regret nothing could have closed, which is
+how two different methods came to report exactly the same figure to three decimal
+places across a hundred seeds.
+
+``reanchor`` turns the mechanism on, and it is off by default so that no number
+already reported moves without someone asking for it. What the sampler needs when
+the anchor moves is not uniform: a policy defined over the same action space
+survives it, a CMA-ES distribution decoded relative to the old parent does not.
+So the campaign never reaches into a sampler. It asks -- through
+[ReanchorableSampler][evogfn.loop.campaign.ReanchorableSampler] -- or it rebuilds
+through a factory the caller supplied, and if it can do neither it refuses at
+construction rather than mid-campaign.
+
 Defaults
 --------
 
@@ -42,11 +69,39 @@ convenience -- it is the size of real ML-guided campaigns. ALDE (Arnold lab,
 wet-lab campaign measured 374 over three rounds. The iterative-benchmark
 convention of 1,000-10,000 evaluations sits above even *classical* directed
 evolution, and well above the regime where MLDE's advantage is claimed.
+
+Running against more than one objective
+--------------------------------------
+
+[CH65Landscape][evogfn.landscapes.ch65.CH65Landscape] returns three affinities
+per variant, and every step of the round above assumes one number: the surrogate
+is fitted to a scalar, the acquisition rule ranks a scalar, the ledger records a
+best-so-far. Something has to state the trade-off, and the campaign refuses to
+be that something -- an invented weighting would be applied to the surrogate, to
+the ranking and to the report without ever appearing in the output.
+
+Instead the *acquisition rule* carries it. A multi-objective campaign is
+constructed with
+[ScalarizedAcquisition][evogfn.acquisition.rules.ScalarizedAcquisition], and the
+loop asks it, through
+[reduce_objectives][evogfn.acquisition.base.Acquisition.reduce_objectives], for
+the one value it ranks. The surrogate's training target, the incumbent an
+improvement rule improves on, and ``best_so_far`` are then the same trade-off by
+construction rather than by three separate call sites agreeing. A rule that
+cannot answer makes the campaign raise *before* the first oracle call, not
+after 384 of them.
+
+What survives as a vector is the *record*: every measurement is stored as the
+objective vector it was, and
+[CampaignResult][evogfn.loop.ledger.CampaignResult] reports hypervolume and
+IGD+ over those vectors. The scalarisation directs the search; it does not
+decide what the search is scored by.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from dataclasses import replace
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import numpy as np
 
@@ -54,9 +109,11 @@ from evogfn.acquisition.rules import Greedy, TopK
 from evogfn.loop.ledger import CampaignResult, RoundRecord
 from evogfn.loop.provenance import write_manifest, write_round
 from evogfn.metrics.diversity import diversity
+from evogfn.metrics.pareto import hypervolume
 from evogfn.tracking.base import NoOpTracker
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     import numpy.typing as npt
@@ -64,6 +121,7 @@ if TYPE_CHECKING:
     from evogfn.acquisition.base import Acquisition, BatchSelector
     from evogfn.algorithms.base import Sampler
     from evogfn.core.types import Fitness, Tokens
+    from evogfn.env.mutation import MutationEnvironment
     from evogfn.landscapes.base import FitnessLandscape
     from evogfn.surrogate.base import Surrogate
     from evogfn.tracking.base import Tracker
@@ -79,6 +137,69 @@ DEFAULT_POOL_SIZE = 2048
 
 #: Below two sequences, pairwise diversity is undefined rather than zero.
 _MIN_FOR_DIVERSITY = 2
+
+# An objective matrix is two-dimensional by definition.
+_MATRIX_NDIM = 2
+
+
+@runtime_checkable
+class StatesReferencePoint(Protocol):
+    """A landscape that can say where its own hypervolume should be measured from.
+
+    A reference point is a claim about the assay -- "below this, a design has
+    contributed nothing on this objective" -- and the landscape is the only
+    object that holds the assay. CH65's is the Tite-Seq detection floor of 6.0
+    on all three antigens, which is where the titration stops resolving; nothing
+    outside the landscape knows that. Where a landscape states one, the campaign
+    prefers it over guessing, and an explicit argument still overrides it.
+    """
+
+    @property
+    def reference_point(self) -> Fitness:
+        """The ``(n_objectives,)`` worst value worth counting on each objective."""
+
+
+@runtime_checkable
+class StatesReferenceFront(Protocol):
+    """A landscape that knows its own Pareto front, for IGD+."""
+
+    @property
+    def reference_front(self) -> Fitness:
+        """A ``(m, n_objectives)`` array of the truly non-dominated values."""
+
+
+@runtime_checkable
+class ReanchorableSampler(Protocol):
+    """A sampler that can be handed a re-anchored environment and carry on.
+
+    What has to happen when the anchor moves is a property of the sampler, and
+    the campaign is not entitled to guess. A GFlowNet policy is defined over an
+    action space of ``length * |alphabet| + 1`` indices that does not change with
+    the anchor, and its input is the state sequence, so the trained weights stay
+    meaningful and only the masks move; a hill climber's current point is a
+    sequence and survives untouched; a CMA-ES mean lives in a one-hot space that
+    is *decoded* relative to the parent, so the same vector means a different
+    design after the move and carrying it across would be silently wrong; a
+    genetic algorithm's population may fall wholly outside the new mutation
+    budget.
+
+    Implementing this is a sampler saying it knows which of those it is. The
+    campaign's alternative is to rebuild through a factory, which is correct but
+    discards whatever the sampler had learned, so a sampler with state worth
+    keeping -- a fitted model, a trained policy, a replay buffer -- should
+    implement this instead.
+    """
+
+    def reanchored(self, env: MutationEnvironment) -> Sampler:
+        """Return the sampler to use from now on, anchored at ``env``.
+
+        Args:
+            env: The environment the campaign has moved to.
+
+        Returns:
+            The sampler for subsequent rounds. Returning ``self`` after
+            updating in place is allowed; the campaign uses whatever comes back.
+        """
 
 
 class Campaign:
@@ -113,10 +234,46 @@ class Campaign:
             the aggregate is the product. A campaign wants the opposite -- the
             designs that went to the lab in round three and what came back --
             and that is what this records.
+        reference_point: The ``(n_objectives,)`` point hypervolume is measured
+            from -- the worst value worth counting on each objective. ``None``
+            takes the landscape's own, through
+            [StatesReferencePoint][evogfn.loop.campaign.StatesReferencePoint],
+            and otherwise leaves hypervolume unreported. Nothing here invents
+            one: hypervolumes taken from different reference points are not
+            comparable, and neither number carries the point it was taken from,
+            so a default would silently make two runs incomparable *and* look
+            like it had not.
+        reference_front: A ``(m, n_objectives)`` front to score IGD+ against,
+            or ``None`` to take the landscape's own where it has one.
+        environment: The mutation environment the sampler searches. Supplying it
+            makes the ledger record which design each round was anchored to and
+            how far that sat from the wild type, and it is what ``reanchor``
+            moves. ``None`` leaves the anchor untracked and unmoved, exactly as
+            before.
+        reanchor: Move the environment's anchor to the best feasible design
+            measured so far, at the end of every round. Off by default: turning
+            it on changes what a campaign can reach, so no number already
+            reported moves unless someone asks for it. With it off the campaign
+            searches one fixed Hamming ball for its whole life and can never
+            reach a design further than ``max_mutations`` from the wild type,
+            however many rounds it runs.
+        sampler_factory: Builds a sampler for a re-anchored environment. Used
+            when the sampler does not implement
+            [ReanchorableSampler][evogfn.loop.campaign.ReanchorableSampler].
+            Rebuilding is correct but forgetful -- a factory that closes over
+            the policy, surrogate or population it means to keep is what carries
+            state across the move.
 
     Raises:
-        ValueError: If any size is not positive, or the pool is smaller than
-            the batch it must be selected from.
+        ValueError: If any size is not positive, if the pool is smaller than
+            the batch it must be selected from, if the landscape returns more
+            than one objective and the acquisition rule cannot rank one, if a
+            supplied reference point or front does not match the objectives, or
+            if re-anchoring is asked for without the means to do it -- no
+            environment to move, or a sampler that can neither be informed nor
+            rebuilt. Refusing at construction rather than at the end of round
+            one is deliberate: the alternative is discovering it after a quarter
+            of the oracle budget has been spent.
     """
 
     def __init__(  # noqa: PLR0913 - a campaign is defined by its protocol
@@ -134,6 +291,11 @@ class Campaign:
         skip_measured: bool = True,
         tracker: Tracker | None = None,
         artifact_dir: Path | None = None,
+        reference_point: npt.ArrayLike | None = None,
+        reference_front: Fitness | None = None,
+        environment: MutationEnvironment | None = None,
+        reanchor: bool = False,
+        sampler_factory: Callable[[MutationEnvironment], Sampler] | None = None,
     ) -> None:
         """Configure the campaign without running it."""
         for name, value in [
@@ -154,6 +316,26 @@ class Campaign:
         self._surrogate = surrogate
         self._acquisition = acquisition or Greedy()
         self._selector = selector or TopK()
+        # Refused here rather than at the first fit: the alternative is a
+        # traceback after a round of oracle calls has already been spent, and
+        # the alternative to *that* is a campaign that quietly ranks on one
+        # antigen out of three.
+        if landscape.n_objectives > 1 and not self._acquisition.supports_multi_objective:
+            raise ValueError(
+                f"{type(landscape).__name__} returns {landscape.n_objectives} objectives per "
+                f"design and {type(self._acquisition).__name__} ranks one value; state the "
+                f"trade-off explicitly, e.g. acquisition=ScalarizedAcquisition(Greedy(), "
+                f"WeightedSum(), preference)"
+            )
+        # A zero-row probe of the right width. It touches no data and costs
+        # nothing, and it turns "the preference covers two objectives, the
+        # landscape returns three" from a traceback in round two -- after a
+        # plate has been measured -- into a refusal at construction.
+        self._acquisition.reduce_objectives(np.zeros((0, landscape.n_objectives)))
+        self._reference_point = _resolve_reference_point(
+            landscape, reference_point, n_objectives=landscape.n_objectives
+        )
+        self._reference_front = _resolve_reference_front(landscape, reference_front)
         self._rounds = rounds
         self._batch_size = batch_size
         self._pool_size = pool_size
@@ -161,6 +343,34 @@ class Campaign:
         self._skip_measured = skip_measured
         self._tracker = tracker or NoOpTracker()
         self._artifact_dir = artifact_dir
+        self._environment = environment
+        self._reanchor = reanchor
+        self._sampler_factory = sampler_factory
+        if reanchor:
+            self._check_can_reanchor()
+
+    def _check_can_reanchor(self) -> None:
+        """Refuse a re-anchoring campaign that has no way to re-anchor.
+
+        Raises:
+            ValueError: If there is no environment whose anchor could move, or
+                if the sampler can neither be informed of the move nor rebuilt
+                for it. Both are configuration errors, and both would otherwise
+                surface at the end of round one with a quarter of the oracle
+                budget already spent.
+        """
+        if self._environment is None:
+            raise ValueError(
+                "reanchor=True needs the environment whose anchor should move; "
+                "pass environment=<the MutationEnvironment the sampler searches>"
+            )
+        if not isinstance(self._sampler, ReanchorableSampler) and self._sampler_factory is None:
+            raise ValueError(
+                f"{type(self._sampler).__name__} cannot follow a moved anchor: it does not "
+                f"implement reanchored(env), and no sampler_factory was given to rebuild it. "
+                f"Re-anchoring anyway would leave the sampler proposing around the old parent "
+                f"while the ledger recorded the new one"
+            )
 
     @property
     def budget(self) -> int:
@@ -169,8 +379,24 @@ class Campaign:
 
     @property
     def sampler(self) -> Sampler:
-        """The method under test, for reading its own accounting after a run."""
+        """The method under test, for reading its own accounting after a run.
+
+        Under ``reanchor`` this is whatever the last move produced -- a rebuilt
+        sampler is a different object from the one passed in, and its proposal
+        count starts from zero, so read it here rather than from the reference
+        you constructed the campaign with.
+        """
         return self._sampler
+
+    @property
+    def environment(self) -> MutationEnvironment | None:
+        """The environment as currently anchored, or ``None`` if none was given.
+
+        After a re-anchoring run this is anchored at the best design measured,
+        not at the wild type. It is a different object from the one passed in:
+        anchors do not move in place.
+        """
+        return self._environment
 
     def run(self) -> CampaignResult:
         """Execute every round and return the ledger.
@@ -184,6 +410,10 @@ class Campaign:
         records: list[RoundRecord] = []
         best_so_far = float("-inf")
         spent = 0
+        # The anchor moves; the wild type is what distance is measured from, so
+        # it is read once and never again.
+        wild_type = None if self._environment is None else self._environment.parent
+        best_anchor_value = float("-inf")
 
         for index in range(self._rounds):
             remaining = self.budget - spent
@@ -214,7 +444,11 @@ class Campaign:
                 scores=scores,
                 previous_best=best_so_far,
                 predicted=predicted,
+                history=values,
             )
+            # Stamped after the fact so that the round is recorded against the
+            # anchor it actually proposed from, never the one it moves to below.
+            record = self._stamp_anchor(record, wild_type)
             if self._artifact_dir is not None:
                 write_round(
                     self._artifact_dir,
@@ -226,21 +460,35 @@ class Campaign:
                 )
             best_so_far = record.best_so_far
             records.append(record)
-            self._tracker.log_metrics(
-                {
-                    "best_so_far": record.best_so_far,
-                    "best_in_round": record.best_in_round,
-                    "batch_diversity": record.batch_diversity,
-                    "feasible_fraction": record.feasible_fraction,
-                    "oracle_calls": float(spent),
-                },
-                step=index,
-            )
+            metrics = {
+                "best_so_far": record.best_so_far,
+                "best_in_round": record.best_in_round,
+                "batch_diversity": record.batch_diversity,
+                "feasible_fraction": record.feasible_fraction,
+                "oracle_calls": float(spent),
+            }
+            # Logged only when it exists. A key that is always present and
+            # usually ``nan`` averages into a table as a missing value nobody
+            # asked for; an absent key is read as "this run did not report it".
+            if np.isfinite(record.hypervolume):
+                metrics["hypervolume"] = record.hypervolume
+            if wild_type is not None:
+                metrics["anchor_distance"] = float(record.anchor_distance)
+            self._tracker.log_metrics(metrics, step=index)
+
+            if self._reanchor:
+                best_anchor_value = self._advance_anchor(batch, scores, best_anchor_value)
 
         if self._artifact_dir is not None and records:
             write_manifest(self._artifact_dir, tuple(records))
 
         optimum = self._landscape.optimum
+        # With one objective the landscape's optimum is a target and the gap to
+        # it is a regret. With several it is an *ideal point* -- the best value
+        # on each objective separately, attained by different designs and by no
+        # single one -- so collapsing it to a scalar would produce a target
+        # nothing can reach and a regret that never reaches zero.
+        single = self._landscape.n_objectives == 1
         return CampaignResult(
             sampler=self._sampler.name,
             rounds=tuple(records),
@@ -252,7 +500,14 @@ class Campaign:
             values=(
                 np.concatenate(values) if values else np.zeros((0, self._landscape.n_objectives))
             ),
-            optimum=float(np.max(optimum)) if optimum is not None else None,
+            optimum=float(np.max(optimum)) if optimum is not None and single else None,
+            ideal_point=(
+                np.asarray(optimum, dtype=np.float64)
+                if optimum is not None and not single
+                else None
+            ),
+            reference_point=self._reference_point,
+            reference_front=self._reference_front,
         )
 
     def _design(
@@ -281,7 +536,11 @@ class Campaign:
             # method rather than an error: it proceeds unassisted and the ledger
             # records a feasible fraction of zero. Raising here would turn the
             # finding into a traceback and lose the rest of the campaign.
-            history = np.concatenate(values)
+            # Reduced by the acquisition rule rather than by the campaign, so
+            # the target the surrogate learns is the same trade-off the rule
+            # will rank predictions on. With one objective this is that
+            # objective, unchanged and still a column.
+            history = self._acquisition.reduce_objectives(np.concatenate(values))[:, None]
             if np.isfinite(history).any():
                 # In place, so any sampler holding this instance sees the update.
                 self._surrogate.fit(np.concatenate(measured), history)
@@ -301,6 +560,84 @@ class Campaign:
         scored = self._acquisition.score(mean, spread, best_observed=best_observed)
         chosen = self._selector.select(pool, scored, size)
         return proposed, screened, pool[chosen], mean[chosen]
+
+    def _stamp_anchor(self, record: RoundRecord, wild_type: Tokens | None) -> RoundRecord:
+        """Record which design this round searched from, and how far out it was.
+
+        Written onto the record rather than passed into
+        [_record][evogfn.loop.campaign.Campaign._record] because it is not a
+        summary of the batch: it is where the batch came from, and it is the
+        only field in the ledger whose value is fixed *before* the round rather
+        than measured after it.
+
+        Args:
+            record: The round's summary, as measured.
+            wild_type: The campaign's original parent, or ``None`` when no
+                environment was supplied and there is no anchor to report.
+
+        Returns:
+            The record, carrying the anchor and its distance from the wild type
+            where those are known, and unchanged where they are not.
+        """
+        if wild_type is None or self._environment is None:
+            return record
+        anchor = self._environment.parent
+        return replace(
+            record,
+            anchor=tuple(int(token) for token in anchor),
+            anchor_distance=int((np.asarray(anchor) != np.asarray(wild_type)).sum()),
+        )
+
+    def _advance_anchor(self, batch: Tokens, scores: Fitness, incumbent: float) -> float:
+        """Move the environment to the best feasible design measured so far.
+
+        The anchor follows the ledger's own ``best_so_far``, on the acquisition
+        rule's scale: the design that set it is the design the next round starts
+        from. Asking the rule rather than reducing the objectives here is what
+        keeps the search, the report and the anchor on one trade-off -- a
+        campaign that ranked by one weighting and re-anchored by another would
+        walk somewhere its own ledger never claimed was good. Ties and
+        non-improving rounds leave the anchor where it is, so a round that
+        learned nothing does not move the search off a peak already found.
+
+        Infeasible designs are never candidates -- they score ``-inf`` and are
+        filtered here -- and
+        [reanchored][evogfn.env.mutation.MutationEnvironment.reanchored] refuses
+        one anyway, which is the second line of defence rather than the first.
+
+        Args:
+            batch: The designs measured this round.
+            scores: Their objective values, ``(n, n_objectives)``.
+            incumbent: The best value that has moved the anchor so far.
+
+        Returns:
+            The value the anchor now sits at, unchanged when nothing improved.
+
+        Raises:
+            ValueError: If the new anchor is not a design this environment
+                could be anchored at -- most usefully, an infeasible one -- or
+                if the acquisition rule cannot reduce the measurements to the
+                one value it ranks.
+        """
+        if self._environment is None:  # pragma: no cover - refused at construction
+            raise RuntimeError("re-anchoring without an environment")
+        flat = self._acquisition.reduce_objectives(scores)
+        finite = np.isfinite(flat)
+        if not finite.any():
+            return incumbent
+        position = int(np.flatnonzero(finite)[np.argmax(flat[finite])])
+        if float(flat[position]) <= incumbent:
+            return incumbent
+
+        env = self._environment.reanchored(np.asarray(batch)[position])
+        if isinstance(self._sampler, ReanchorableSampler):
+            self._sampler = self._sampler.reanchored(env)
+        elif self._sampler_factory is not None:
+            self._sampler = self._sampler_factory(env)
+        else:  # pragma: no cover - refused at construction
+            raise RuntimeError("re-anchoring without a way to move the sampler")
+        self._environment = env
+        return float(flat[position])
 
     def _pool(self, index: int) -> Tokens:
         """The candidates this round selects from, before deduplication."""
@@ -331,9 +668,26 @@ class Campaign:
         scores: Fitness,
         previous_best: float,
         predicted: npt.NDArray[np.floating] | None = None,
+        history: list[Fitness] | None = None,
     ) -> RoundRecord:
-        """Summarise a completed round."""
-        flat = np.asarray(scores, dtype=np.float64).reshape(scores.shape[0], -1).max(axis=1)
+        """Summarise a completed round.
+
+        Args:
+            index: Zero-based round number.
+            proposed: Candidates the sampler generated.
+            screened: Proposals that reached the selector.
+            batch: The sequences measured.
+            scores: Their ``(n, n_objectives)`` measured values.
+            previous_best: Best value before this round.
+            predicted: What the surrogate said the batch would score, or
+                ``None`` when there was no surrogate.
+            history: Every round's measurements including this one, for the
+                cumulative hypervolume. ``None`` leaves it unreported.
+
+        Returns:
+            The round's ledger entry.
+        """
+        flat = self._acquisition.reduce_objectives(scores)
         finite = flat[np.isfinite(flat)]
         best_in_round = float(finite.max()) if finite.size else float("-inf")
         return RoundRecord(
@@ -347,25 +701,58 @@ class Campaign:
             mean_in_round=float(finite.mean()) if finite.size else float("-inf"),
             batch_diversity=(diversity(batch) if batch.shape[0] >= _MIN_FOR_DIVERSITY else 0.0),
             surrogate_correlation=_correlation(predicted, flat),
+            hypervolume=self._hypervolume(history),
         )
 
-    @staticmethod
-    def _best_observed(values: list[Fitness]) -> float:
+    def _hypervolume(self, history: list[Fitness] | None) -> float:
+        """Volume dominated by everything measured so far, or ``nan``.
+
+        Args:
+            history: Every round's measurements, including the one just made.
+
+        Returns:
+            The dominated volume, or ``nan`` when there is no reference point to
+            measure it from or when the exact method cannot run.
+
+        Note:
+            A front larger than the exact hypervolume in
+            [evogfn.metrics.pareto][] accepts is caught and reported as ``nan``
+            rather than raised. Raising would abort a campaign *after* its oracle
+            calls had been spent, over a summary statistic -- the measurements
+            are the product and they survive either way. It is not swallowed
+            into a plausible number: ``nan`` propagates, and the front is still
+            on the result for anyone who wants to score it with a dedicated
+            implementation.
+        """
+        if self._reference_point is None or not history:
+            return float("nan")
+        try:
+            return hypervolume(np.concatenate(history), self._reference_point)
+        except NotImplementedError:
+            return float("nan")
+
+    def _best_observed(self, values: list[Fitness]) -> float:
         """Best finite measurement so far, for improvement-based acquisition.
 
         Args:
-            values: One ``(n, 1)`` array of objective values per completed round.
+            values: One ``(n, n_objectives)`` array of objective values per
+                completed round.
 
         Returns:
-            The largest finite value measured, or ``0.0`` if nothing finite has
-            been measured yet -- the incumbent an improvement rule falls back to
-            before there is one.
+            The largest finite value measured, on the scale the acquisition
+            rule's
+            [reduce_objectives][evogfn.acquisition.base.Acquisition.reduce_objectives]
+            puts measurements on, or ``0.0`` if nothing finite has been measured
+            yet -- the incumbent an improvement rule falls back to before there
+            is one.
 
         Raises:
-            ValueError: If the measurements carry more than one objective, where
-                "the best value so far" is not defined without a scalarisation.
+            ValueError: If the rule cannot reduce the measurements it is given,
+                which is where a scalar rule on a multi-objective landscape
+                stops rather than improving on an incumbent taken across
+                objectives of different scales.
         """
-        flat = _single_objective(np.concatenate(values))
+        flat = self._acquisition.reduce_objectives(np.concatenate(values))
         finite = flat[np.isfinite(flat)]
         return float(finite.max()) if finite.size else 0.0
 
@@ -398,28 +785,82 @@ def _correlation(
     return float(np.corrcoef(left, right)[0, 1])
 
 
-def _single_objective(values: Fitness) -> npt.NDArray[np.float64]:
-    """Accept ``(n,)`` or single-objective ``(n, 1)`` and return ``(n,)``.
+def _resolve_reference_point(
+    landscape: FitnessLandscape,
+    supplied: npt.ArrayLike | None,
+    *,
+    n_objectives: int,
+) -> npt.NDArray[np.float64] | None:
+    """Settle where hypervolume is measured from, or leave it unmeasured.
+
+    Precedence is caller, then landscape, then nothing. Nothing is a real
+    answer: a default reference point would be applied silently, would not
+    appear next to the number it produced, and would make two runs with
+    different landscapes -- or the same landscape a version apart --
+    incomparable in a way no assertion could catch.
 
     Args:
-        values: Objective values for the measurements made so far.
+        landscape: The oracle, asked for its own reference point when the caller
+            supplied none.
+        supplied: An explicit ``(n_objectives,)`` point, or ``None``.
+        n_objectives: Objectives the landscape returns.
 
     Returns:
-        An ``(n,)`` array, one value per measured design.
+        The reference point, or ``None`` when neither the caller nor the
+        landscape stated one.
 
     Raises:
-        ValueError: If the input has more than one objective. Flattening it
-            would hand the acquisition rule an incumbent taken across objectives
-            of different scales, which no expected-improvement calculation is
-            defined against.
+        ValueError: If the point is not a finite vector of the right width.
     """
-    array = np.asarray(values, dtype=np.float64)
-    if array.ndim == 1:
-        return array
-    if array.ndim == 2 and array.shape[1] == 1:  # noqa: PLR2004 - a single objective
-        return array[:, 0]
-    raise ValueError(
-        f"expected shape (n,) or (n, 1), got {array.shape}; multi-objective "
-        f"measurements must be scalarised before an improvement-based acquisition "
-        f"rule has an incumbent to improve on"
-    )
+    point = supplied
+    if point is None:
+        if not isinstance(landscape, StatesReferencePoint):
+            return None
+        point = landscape.reference_point
+    array = np.asarray(point, dtype=np.float64)
+    if array.ndim != 1 or array.shape[0] != n_objectives:
+        raise ValueError(
+            f"expected a reference point of shape ({n_objectives},), got {array.shape}"
+        )
+    if not np.isfinite(array).all():
+        raise ValueError(
+            "the reference point must be finite; an infinite one makes every hypervolume "
+            "computed against it infinite or zero"
+        )
+    return array
+
+
+def _resolve_reference_front(
+    landscape: FitnessLandscape, supplied: Fitness | None
+) -> npt.NDArray[np.float64] | None:
+    """Settle which front IGD+ is scored against, or leave it unscored.
+
+    Args:
+        landscape: The oracle, asked for its own front when the caller supplied
+            none.
+        supplied: An explicit ``(m, n_objectives)`` front, or ``None``.
+
+    Returns:
+        The reference front, or ``None`` when neither the caller nor the
+        landscape stated one.
+
+    Raises:
+        ValueError: If the front is not a two-dimensional matrix of the right
+            width, or is not finite.
+    """
+    front = supplied
+    if front is None:
+        if not isinstance(landscape, StatesReferenceFront):
+            return None
+        front = landscape.reference_front
+    array = np.asarray(front, dtype=np.float64)
+    if array.ndim != _MATRIX_NDIM or array.shape[1] != landscape.n_objectives:
+        raise ValueError(
+            f"expected a reference front of shape (m, {landscape.n_objectives}), got {array.shape}"
+        )
+    if not np.isfinite(array).all():
+        raise ValueError(
+            "the reference front must be finite; an infinite reference point makes every "
+            "distance to it infinite or undefined"
+        )
+    return array

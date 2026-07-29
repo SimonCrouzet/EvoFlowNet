@@ -9,11 +9,13 @@ from evogfn.acquisition import (
     DiverseTopK,
     ExpectedImprovement,
     Greedy,
+    ScalarizedAcquisition,
     Thompson,
     TopK,
     UpperConfidenceBound,
 )
 from evogfn.metrics import diversity
+from evogfn.rewards.scalarization import Tchebycheff, WeightedSum
 
 
 class TestAcquisitionRules:
@@ -104,6 +106,101 @@ class TestAcquisitionRules:
             [rule.score(np.zeros(2), np.array([0.01, 5.0]), best_observed=0.0) for _ in range(200)]
         )
         assert draws[:, 0].std() < draws[:, 1].std()
+
+
+class TestScalarOnlyRulesRefuseObjectiveVectors:
+    # The failure this exists to prevent is silent: an (n, 3) prediction handed
+    # to UCB broadcasts into a well-formed ranking computed on nothing in
+    # particular, and no field of the output says which objective won.
+    @pytest.mark.parametrize(
+        "rule", [Greedy(), UpperConfidenceBound(), ExpectedImprovement(), Thompson()]
+    )
+    def test_a_vector_valued_prediction_is_refused(self, rule):
+        mean = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        with pytest.raises(ValueError, match="ScalarizedAcquisition"):
+            rule.score(mean, np.ones_like(mean), best_observed=0.0)
+
+    @pytest.mark.parametrize(
+        "rule", [Greedy(), UpperConfidenceBound(), ExpectedImprovement(), Thompson()]
+    )
+    def test_multi_objective_measurements_cannot_be_reduced(self, rule):
+        with pytest.raises(ValueError, match="scalarised"):
+            rule.reduce_objectives(np.zeros((4, 3)))
+
+    def test_a_single_objective_column_is_still_accepted(self):
+        assert Greedy().reduce_objectives(np.array([[1.0], [2.0]])).tolist() == [1.0, 2.0]
+
+    def test_a_mismatched_spread_is_refused(self):
+        with pytest.raises(ValueError, match="one spread per predicted value"):
+            Greedy().score(np.zeros(3), np.zeros(4), best_observed=0.0)
+
+
+class TestScalarizedAcquisition:
+    def setup_method(self):
+        self.rule = ScalarizedAcquisition(Greedy(), WeightedSum(), [0.5, 0.5])
+
+    def test_it_declares_that_it_ranks_vectors(self):
+        assert self.rule.supports_multi_objective
+        assert not Greedy().supports_multi_objective
+
+    def test_it_ranks_by_the_stated_trade_off(self):
+        # Second design wins on the sum despite losing on the first objective.
+        mean = np.array([[4.0, 0.0], [1.0, 5.0]])
+        scored = self.rule.score(mean, np.zeros_like(mean), best_observed=0.0)
+        assert scored == pytest.approx([2.0, 3.0])
+
+    def test_a_lopsided_preference_moves_the_ranking(self):
+        mean = np.array([[4.0, 0.0], [1.0, 5.0]])
+        towards_first = ScalarizedAcquisition(Greedy(), WeightedSum(), [0.9, 0.1])
+        scored = towards_first.score(mean, np.zeros_like(mean), best_observed=0.0)
+        assert scored[0] > scored[1]
+
+    def test_measurements_reduce_through_the_same_preference(self):
+        # The property the whole design rests on: what the surrogate is fitted
+        # to and what the rule ranks are the same function of the objectives.
+        values = np.array([[4.0, 0.0], [1.0, 5.0]])
+        assert self.rule.reduce_objectives(values) == pytest.approx([2.0, 3.0])
+
+    def test_uncertainty_reaches_the_inner_rule(self):
+        # A scalarisation of the means alone would leave an improvement rule
+        # with no spread at all, and every candidate would look certain.
+        rule = ScalarizedAcquisition(ExpectedImprovement(), WeightedSum(), [0.5, 0.5])
+        mean = np.array([[1.0, 1.0], [1.0, 1.0]])
+        std = np.array([[0.01, 0.01], [3.0, 3.0]])
+        scored = rule.score(mean, std, best_observed=1.0)
+        assert scored[1] > scored[0]
+
+    def test_an_already_scalar_prediction_is_passed_straight_through(self):
+        # A single-output surrogate has effectively been fitted to the
+        # scalarised target already; applying the preference again would weight
+        # a number that is not an objective vector.
+        mean, std = np.array([1.0, 3.0]), np.array([0.0, 0.0])
+        assert self.rule.score(mean, std, best_observed=0.0) == pytest.approx(mean)
+
+    def test_it_works_with_a_non_linear_scalarisation(self):
+        rule = ScalarizedAcquisition(Greedy(), Tchebycheff(), [0.5, 0.5])
+        mean = np.array([[4.0, 4.0], [8.0, 0.0]])
+        scored = rule.score(mean, np.zeros_like(mean), best_observed=0.0)
+        # Tchebycheff scores the worst weighted objective, so the balanced
+        # design wins outright where the weighted sum would tie them.
+        assert scored[0] > scored[1]
+
+    @pytest.mark.parametrize(
+        ("preference", "message"),
+        [
+            ([0.5, 0.6], "sum to 1"),
+            ([-0.5, 1.5], "non-negative"),
+            ([[0.5, 0.5]], "shape"),
+            ([np.inf, 0.0], "finite"),
+        ],
+    )
+    def test_a_malformed_preference_is_refused(self, preference, message):
+        with pytest.raises(ValueError, match=message):
+            ScalarizedAcquisition(Greedy(), WeightedSum(), preference)
+
+    def test_it_names_its_parts(self):
+        assert "Greedy" in repr(self.rule)
+        assert "WeightedSum" in repr(self.rule)
 
 
 class TestBatchSelection:

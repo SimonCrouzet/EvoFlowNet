@@ -1,5 +1,13 @@
 """Running comparisons so that the numbers mean what the table says they mean."""
 
+from evogfn.benchmark.attainable import (
+    AttainableOptimum,
+    attainable_optimum,
+    per_round_budget,
+    planted_distance,
+    planted_optimum_reachable,
+    reanchored_attainable,
+)
 from evogfn.benchmark.harness import (
     ArmFactory,
     ArmResult,
@@ -25,8 +33,12 @@ from evogfn.benchmark.protocol import (
 from evogfn.benchmark.statistics import PairedComparison, compare, seeds_needed
 from evogfn.benchmark.store import FINGERPRINTED, ResultStore, RunRecord, fingerprint
 from evogfn.benchmark.suite import (
+    DIAGNOSTIC_MUTATIONS,
+    FEASIBILITY_MUTATIONS,
+    GB1_MUTATIONS,
+    LARGE_SPACE_MUTATIONS,
     MAIN,
-    MUTATIONS,
+    PROTOCOL_MUTATIONS,
     Tier,
     budget_gradient,
     objective_task,
@@ -39,15 +51,20 @@ from evogfn.benchmark.tasks import Task
 
 __all__ = [
     "BASELINES",
+    "DIAGNOSTIC_MUTATIONS",
+    "FEASIBILITY_MUTATIONS",
     "FINGERPRINTED",
+    "GB1_MUTATIONS",
+    "LARGE_SPACE_MUTATIONS",
     "MAIN",
     "ML_CONVENTION",
-    "MUTATIONS",
     "OBJECTIVES",
     "PLATE",
+    "PROTOCOL_MUTATIONS",
     "WET_LAB_PROTOCOLS",
     "ArmFactory",
     "ArmResult",
+    "AttainableOptimum",
     "BenchmarkResult",
     "Methodology",
     "PairedComparison",
@@ -56,6 +73,7 @@ __all__ = [
     "RunRecord",
     "Task",
     "Tier",
+    "attainable_optimum",
     "budget_gradient",
     "classical",
     "compare",
@@ -64,6 +82,10 @@ __all__ = [
     "flow_objectives",
     "gflownet",
     "objective_task",
+    "per_round_budget",
+    "planted_distance",
+    "planted_optimum_reachable",
+    "reanchored_attainable",
     "records_to_metric",
     "round_sweep",
     "rounds_curve",

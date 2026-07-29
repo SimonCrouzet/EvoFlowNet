@@ -27,14 +27,39 @@ Bayesian-optimisation methods running out of memory at 64. holo-bench ships
   degrades;
 * diagnostics use **L = 32**, cheap enough to sweep an axis at 50 seeds.
 
-Mutation budget is 4 everywhere, so a conclusion drawn on a diagnostic transfers
-to the main table rather than being confounded by a different search radius.
+The mutation budget is per task, and that is not a convenience
+--------------------------------------------------------------
+
+It used to be 4 everywhere, on the argument that a shared search radius lets a
+conclusion drawn on a diagnostic transfer to the main table. The argument was
+right and the number was wrong, because a budget is only comparable across tasks
+if it means the same thing on each -- and on an Ehrlich instance it did not.
+
+Reaching reward 1.0 there means placing every residue of every motif, and the
+parent is drawn independently of the planted optimum, so the two differ in
+roughly ``L * (1 - 1/v)`` positions: 248 on the flagship task, 61 to 62 on the
+mid-size ones. At a budget of 4 the planted optimum was outside the search space
+of every task in ``MAIN`` except the GB1 anchor. Regret was then measured
+against a target no method could reach, so most of the column was a constant
+that said nothing about any method, and the arms were separated by whatever
+fraction was left.
+
+Each task therefore carries its own budget, set to the distance its own planted
+optimum sits at. They are stated as named constants rather than derived, so the
+number a run used is readable without instantiating a landscape, and
+``tests/benchmark/test_attainable.py`` asserts against every task in ``MAIN``
+that the planted optimum is inside the budget -- which is the check whose
+absence is what let this stand.
+
+[evogfn.benchmark.attainable][] is the other half: reachability is *not*
+implied by budget, so what a task can attain still has to be audited rather than
+assumed.
 """
 
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -54,8 +79,25 @@ if TYPE_CHECKING:
     from evogfn.landscapes.base import FitnessLandscape
     from evogfn.loop.ledger import CampaignResult
 
-#: Mutation budget, held constant so diagnostics transfer to the main table.
-MUTATIONS = 4
+#: GB1's four measured sites. Equal to the sequence length, so every variant in
+#: the published table is reachable and the anchor exercises no search radius.
+GB1_MUTATIONS = 4
+
+#: Distance from the flagship task's parent to its planted optimum, at L=256.
+#: Below 256, so the radius still constrains the search; at 248 it no longer
+#: excludes the answer.
+LARGE_SPACE_MUTATIONS = 248
+
+#: Same, for the feasibility task at L=64.
+FEASIBILITY_MUTATIONS = 62
+
+#: Same, for the two protocol tasks -- one landscape, so one distance.
+PROTOCOL_MUTATIONS = 61
+
+#: Same, for the shared diagnostic landscape at L=32. It reaches the sequence
+#: length, which is what a parent drawn independently of the planted optimum
+#: costs at this size: the two agree in fewer than one position on average.
+DIAGNOSTIC_MUTATIONS = 32
 
 #: Where a campaign's code actually starts, for staleness. Everything a run
 #: touches is reachable from these two: the methodology table pulls in every
@@ -95,13 +137,37 @@ def _task(
     build: Callable[[], FitnessLandscape],
     protocol: Protocol,
 ) -> Task:
-    """A task at the shared mutation budget."""
+    """A task whose search radius is the one its protocol was costed at.
+
+    Taking the budget from the protocol rather than accepting it separately is
+    what stops the two disagreeing. They are read by different code -- the
+    environment uses the task's, `Protocol.constrains_search` reports the
+    protocol's -- and a task that searched at one radius while reporting another
+    would be undetectable from the stored record, which carries only the
+    protocol's repr.
+
+    Args:
+        name: Short identifier.
+        purpose: What this task decides that the others cannot.
+        build: Makes the landscape.
+        protocol: Rounds, batch size and mutation budget.
+
+    Returns:
+        The task.
+
+    Raises:
+        ValueError: If the protocol states no mutation budget. A task without
+            one searches the whole space, which is a decision worth writing
+            down rather than defaulting into.
+    """
+    if protocol.max_mutations is None:
+        raise ValueError(f"{name}: protocol must state a mutation budget")
     return Task(
         name=name,
         purpose=purpose,
         build=build,
         protocol=protocol,
-        max_mutations=MUTATIONS,
+        max_mutations=protocol.max_mutations,
     )
 
 
@@ -123,15 +189,18 @@ MAIN: tuple[Task, ...] = (
         "the easiest geometry here: four sites, no feasibility constraint, and "
         "a mutation budget that reaches every sequence.",
         GB1Landscape,
-        Protocol(rounds=4, batch_size=PLATE, max_mutations=MUTATIONS, label="four plates"),
+        Protocol(rounds=4, batch_size=PLATE, max_mutations=GB1_MUTATIONS, label="four plates"),
     ),
     _task(
         "large-space",
         "Can the method search a space it cannot enumerate? Stanton et al.'s "
-        "base configuration, L=256 with four motifs of length eight. The "
-        "reachable set is ~10^13 designs and the budget is 384.",
+        "base configuration, L=256 with four motifs of length eight. The budget "
+        "is 384 designs against a reachable set with no useful upper digit -- "
+        "248 substitutions of 256 positions over an alphabet of 20.",
         STANTON_BASE,
-        Protocol(rounds=4, batch_size=PLATE, max_mutations=MUTATIONS, label="four plates"),
+        Protocol(
+            rounds=4, batch_size=PLATE, max_mutations=LARGE_SPACE_MUTATIONS, label="four plates"
+        ),
     ),
     _task(
         "feasibility",
@@ -146,7 +215,9 @@ MAIN: tuple[Task, ...] = (
             transition_density=0.15,
             seed=1,
         ),
-        Protocol(rounds=4, batch_size=PLATE, max_mutations=MUTATIONS, label="four plates"),
+        Protocol(
+            rounds=4, batch_size=PLATE, max_mutations=FEASIBILITY_MUTATIONS, label="four plates"
+        ),
     ),
     _task(
         "protocol-alde",
@@ -160,7 +231,7 @@ MAIN: tuple[Task, ...] = (
             transition_density=0.5,
             seed=2,
         ),
-        Protocol(rounds=3, batch_size=132, max_mutations=MUTATIONS, label="ALDE"),
+        Protocol(rounds=3, batch_size=132, max_mutations=PROTOCOL_MUTATIONS, label="ALDE"),
     ),
     _task(
         "protocol-evolvepro",
@@ -175,7 +246,7 @@ MAIN: tuple[Task, ...] = (
             transition_density=0.5,
             seed=2,
         ),
-        Protocol(rounds=8, batch_size=48, max_mutations=MUTATIONS, label="EVOLVEpro-like"),
+        Protocol(rounds=8, batch_size=48, max_mutations=PROTOCOL_MUTATIONS, label="EVOLVEpro-like"),
     ),
 )
 
@@ -204,7 +275,7 @@ def budget_gradient() -> tuple[Task, ...]:
             f"budget-{rounds * batch}",
             f"Budget gradient at {rounds * batch} calls.",
             DIAGNOSTIC_LANDSCAPE,
-            Protocol(rounds=rounds, batch_size=batch, max_mutations=MUTATIONS),
+            Protocol(rounds=rounds, batch_size=batch, max_mutations=DIAGNOSTIC_MUTATIONS),
         )
         for rounds, batch in ((8, 12), (4, PLATE), (10, 100), (10, 1000))
     )
@@ -224,7 +295,10 @@ def rounds_curve(budget: int = 384) -> tuple[Task, ...]:
             f"rounds-{protocol.rounds}x{protocol.batch_size}",
             f"Response curve: {protocol.rounds} rounds of {protocol.batch_size}.",
             DIAGNOSTIC_LANDSCAPE,
-            protocol,
+            # `round_sweep` varies the shape and says nothing about the search
+            # radius, so the diagnostic's own is filled in here rather than
+            # letting the sweep decide an axis it is not varying.
+            replace(protocol, max_mutations=DIAGNOSTIC_MUTATIONS),
         )
         for protocol in round_sweep(budget)
     )
@@ -237,7 +311,7 @@ def objective_task() -> Task:
         "Which training objective, at equal budget? GFlowNet-only, since a "
         "classical baseline has no objective to vary.",
         DIAGNOSTIC_LANDSCAPE,
-        Protocol(rounds=4, batch_size=PLATE, max_mutations=MUTATIONS),
+        Protocol(rounds=4, batch_size=PLATE, max_mutations=DIAGNOSTIC_MUTATIONS),
     )
 
 
@@ -261,6 +335,58 @@ class Tier:
         """Name the tier, its size and its standing."""
         kind = "main" if self.headline else "diagnostic"
         return f"{self.name} ({kind}, {len(self.tasks)} tasks x {len(self.seeds)} seeds)"
+
+
+def _scores(task: Task, result: CampaignResult, best_possible: float | None) -> dict[str, object]:
+    """The two numbers a stored record is indexed by, whatever it measured.
+
+    `RunRecord` has one larger-is-better field and one smaller-is-better field,
+    and every table built off the store reads them positionally. So the only
+    safe thing to put in them is a pair that means the same thing down the whole
+    column, and what that pair *is* differs by objective count:
+
+    * **One objective.** Best value measured, and the distance from it to the
+      landscape's optimum. Unchanged, and still the honest reading only once
+      [evogfn.benchmark.attainable][] says the optimum was reachable.
+    * **More than one.** Hypervolume above the campaign's reference point, and
+      IGD+ against its reference front. These are the multi-objective
+      counterparts with the same orientation -- hypervolume rises as the set
+      improves, IGD+ falls to zero when the front is covered -- so a column
+      built from them is at least internally coherent.
+
+    [CampaignResult.best_value][evogfn.loop.ledger.CampaignResult.best_value]
+    now raises on a multi-objective result rather than returning the maximum
+    over designs *and* objectives, which is why this branch exists at all.
+
+    Args:
+        task: The task being run, named in any error.
+        result: The completed campaign.
+        best_possible: The landscape's optimum, or ``None`` when unknown.
+
+    Returns:
+        ``best`` and ``regret``, ready to pass to
+        [ResultStore.stamp][evogfn.benchmark.store.ResultStore.stamp].
+
+    Raises:
+        ValueError: If a multi-objective campaign supplied no reference point.
+            Storing such a run under a ``best`` that means something different
+            from every other row in the column is precisely the silent
+            mixing the store exists to prevent, so it is refused rather than
+            filled with ``nan``.
+    """
+    if not result.is_multi_objective:
+        return {
+            "best": result.best_value,
+            "regret": (best_possible - result.best_value if best_possible is not None else None),
+        }
+    volume = result.hypervolume
+    if volume is None:
+        raise ValueError(
+            f"{task.name} measured {result.n_objectives} objectives but supplied no reference "
+            f"point, so its result has no indicator to be stored under; give the campaign a "
+            f"reference_point, or score it single-objective"
+        )
+    return {"best": volume, "regret": result.igd_plus}
 
 
 def run_task(
@@ -315,10 +441,7 @@ def run_task(
                     method=name,
                     seed=seed,
                     protocol=repr(task.protocol),
-                    best=result.best_value,
-                    regret=(
-                        best_possible - result.best_value if best_possible is not None else None
-                    ),
+                    **_scores(task, result, best_possible),
                     diversity=(diversity(result.sequences) if len(result.sequences) > 1 else 0.0),
                     feasible_fraction=feasible,
                     oracle_calls=result.oracle_calls,
@@ -339,6 +462,13 @@ def run_task(
                             "mean_in_round": record.mean_in_round,
                             "batch_diversity": record.batch_diversity,
                             "surrogate_correlation": record.surrogate_correlation,
+                            "hypervolume": record.hypervolume,
+                            # How far this round's anchor sat from the wild
+                            # type. Flat at zero says the campaign searched one
+                            # Hamming ball for its whole life, which is the
+                            # difference between a budget of `max_mutations` and
+                            # a budget of `max_mutations` per round.
+                            "anchor_distance": float(record.anchor_distance),
                         }
                         for record in result.rounds
                     ],
