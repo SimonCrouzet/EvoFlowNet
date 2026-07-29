@@ -7,7 +7,7 @@ demonstration that it separates a proportional sampler from a greedy one.
 import numpy as np
 import pytest
 
-from evoflownet.metrics import (
+from evogfn.metrics import (
     empirical_distribution,
     expected_l1_from_sampling_noise,
     l1_distance,

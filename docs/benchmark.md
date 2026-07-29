@@ -166,7 +166,7 @@ from 30 to 50 costs twenty campaigns per arm, not fifty.
 ### Staleness
 
 A stored result carries a fingerprint of the code that could have produced it. The entry
-points are declared (`evoflownet.benchmark.methods` and `evoflownet.loop.campaign`) rather
+points are declared (`evogfn.benchmark.methods` and `evogfn.loop.campaign`) rather
 than derived, and that declaration is what makes the mechanism pay: a record goes stale only
 when something it can actually reach has changed. Hashing the whole package tree instead meant
 that adding an unrelated file invalidated ~3,900 campaigns.
@@ -197,5 +197,5 @@ and effects smaller than it should not be read.
 
 ## API
 
-- [`evoflownet.benchmark`](reference/benchmark.md) — tasks, protocols, suite, harness, store.
+- [`evogfn.benchmark`](reference/benchmark.md) — tasks, protocols, suite, harness, store.
 - [What this does not show](limitations.md) — the full ledger of claims and their status.

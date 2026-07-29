@@ -9,12 +9,12 @@ tested harder than the optimisation.
 import numpy as np
 import pytest
 
-from evoflownet.acquisition import DiverseTopK, ExpectedImprovement, Greedy, TopK
-from evoflownet.algorithms.base import Sampler
-from evoflownet.core.types import Alphabet
-from evoflownet.landscapes.base import FitnessLandscape
-from evoflownet.loop import Campaign
-from evoflownet.surrogate import DeepEnsemble
+from evogfn.acquisition import DiverseTopK, ExpectedImprovement, Greedy, TopK
+from evogfn.algorithms.base import Sampler
+from evogfn.core.types import Alphabet
+from evogfn.landscapes.base import FitnessLandscape
+from evogfn.loop import Campaign
+from evogfn.surrogate import DeepEnsemble
 
 ALPHABET = Alphabet.from_string("ABCD")
 LENGTH = 6

@@ -1,6 +1,6 @@
-# EvoFlowNet
+# EvoGFN
 
-**EvoFlowNet** is a Python library for in-silico directed evolution with Generative Flow Networks
+**EvoGFN** is a Python library for in-silico directed evolution with Generative Flow Networks
 (GFlowNets). It generates batches of sequence variants that are diverse and high-fitness at the same
 time, rather than many near-copies of a single best hit.
 
@@ -31,8 +31,8 @@ that is a direct model of what directed evolution actually does.
 Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-git clone https://github.com/SimonCrouzet/EvoFlowNet
-cd EvoFlowNet
+git clone https://github.com/SimonCrouzet/EvoGFN
+cd EvoGFN
 uv sync                  # GPU (CUDA build of torch)
 uv sync --extra cpu      # CPU only — 1.1GB instead of 4.7GB
 ```
@@ -53,7 +53,7 @@ whether it produced a plausible-looking number.
 | **Ehrlich** | Closed-form, procedurally generated sequences with tunable epistasis, ruggedness and feasibility constraints | The optimum is guaranteed reachable, so you can measure true regret. No download; evaluation is instant |
 | **GB1** | Real deep-mutational-scanning data: 149,361 measured variants across 4 positions | Combinatorially complete, so every sequence has a ground-truth fitness and the whole space can be enumerated |
 
-Ehrlich landscapes also define which sequences are *constructible* at all. EvoFlowNet enforces this by
+Ehrlich landscapes also define which sequences are *constructible* at all. EvoGFN enforces this by
 masking invalid actions during generation, so every proposed sequence is feasible by construction
 rather than filtered out afterwards.
 
@@ -109,7 +109,7 @@ provided that you preserve the copyright notice and license text in any distribu
 ## About
 
 I'm Simon Crouzet, an independent researcher and consultant in AI/ML for molecular design and drug
-discovery. EvoFlowNet came out of a long-standing interest in directed evolution, and in GFlowNets —
+discovery. EvoGFN came out of a long-standing interest in directed evolution, and in GFlowNets —
 and in what happens when you stop treating the first as an optimisation problem and start treating it
 as the sampling problem the second was built for.
 
@@ -131,10 +131,10 @@ the existing suite. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup and conve
 
 ## Credit & Citation
 
-EvoFlowNet is open source under the Apache 2.0 License. You are free to use it in research and
+EvoGFN is open source under the Apache 2.0 License. You are free to use it in research and
 commercial work — please credit the original project and respect the license terms.
 
-If you use EvoFlowNet in your work, please acknowledge it and feel free to get in touch.
+If you use EvoGFN in your work, please acknowledge it and feel free to get in touch.
 
 ---
 

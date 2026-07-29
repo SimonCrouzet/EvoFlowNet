@@ -1,10 +1,10 @@
-site_name: EvoFlowNet
+site_name: EvoGFN
 site_description: >-
   GFlowNets for in-silico directed evolution: sampling diverse, feasible,
   high-fitness protein variants under a wet-lab budget.
-site_url: https://simoncrouzet.github.io/evoflownet/
-repo_url: https://github.com/SimonCrouzet/EvoFlowNet
-repo_name: SimonCrouzet/EvoFlowNet
+site_url: https://simoncrouzet.github.io/evogfn/
+repo_url: https://github.com/SimonCrouzet/EvoGFN
+repo_name: SimonCrouzet/EvoGFN
 copyright: Copyright &copy; 2026 Simon J. Crouzet — Apache-2.0
 
 # A link that 404s is worse than no link, and the API pages are generated from

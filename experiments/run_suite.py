@@ -19,11 +19,11 @@ import sys
 import time
 from pathlib import Path
 
-from evoflownet.benchmark.determinism import configure_determinism, is_deterministic
-from evoflownet.benchmark.methods import BASELINES, OBJECTIVES, flow_objectives
-from evoflownet.benchmark.statistics import compare, seeds_needed
-from evoflownet.benchmark.store import ResultStore
-from evoflownet.benchmark.suite import (
+from evogfn.benchmark.determinism import configure_determinism, is_deterministic
+from evogfn.benchmark.methods import BASELINES, OBJECTIVES, flow_objectives
+from evogfn.benchmark.statistics import compare, seeds_needed
+from evogfn.benchmark.store import ResultStore
+from evogfn.benchmark.suite import (
     MAIN,
     Tier,
     budget_gradient,

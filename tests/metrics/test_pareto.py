@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from evoflownet.metrics import (
+from evogfn.metrics import (
     gd_plus,
     hypervolume,
     igd_plus,
@@ -11,7 +11,7 @@ from evoflownet.metrics import (
     pareto_front,
     r2_indicator,
 )
-from evoflownet.metrics.pareto import MAX_INCLUSION_EXCLUSION_POINTS
+from evogfn.metrics.pareto import MAX_INCLUSION_EXCLUSION_POINTS
 
 
 class TestNonDominated:

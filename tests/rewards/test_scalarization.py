@@ -3,14 +3,14 @@
 import numpy as np
 import pytest
 
-from evoflownet.rewards import (
+from evogfn.rewards import (
     ScalarizedReward,
     Tchebycheff,
     TemperedReward,
     WeightedLogSum,
     WeightedSum,
 )
-from evoflownet.rewards.base import Reward
+from evogfn.rewards.base import Reward
 
 ALL_SCALARIZATIONS = [WeightedSum(), Tchebycheff(), WeightedLogSum()]
 

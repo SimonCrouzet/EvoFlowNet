@@ -4,8 +4,8 @@ The design–build–test–learn round engine and its budget ledger. This modul
 identically for every sampler, so a difference in results is a difference between methods
 rather than between harnesses.
 
-::: evoflownet.loop.campaign
+::: evogfn.loop.campaign
 
-::: evoflownet.loop.ledger
+::: evogfn.loop.ledger
 
-::: evoflownet.loop.provenance
+::: evogfn.loop.provenance

@@ -3,14 +3,14 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "evoflownet"
+name = "evogfn"
 version = "0.1.0.dev0"
 description = "GFlowNets for in-silico directed evolution: sampling diverse, feasible, high-fitness protein variants."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-authors = [{ name = "EvoFlowNet Contributors" }]
+authors = [{ name = "EvoGFN Contributors" }]
 keywords = [
     "gflownet",
     "directed-evolution",
@@ -64,17 +64,17 @@ cuda = ["torch>=2.4"]
 cpu = ["torch>=2.4"]
 
 [project.urls]
-Homepage = "https://github.com/SimonCrouzet/EvoFlowNet"
-Documentation = "https://simoncrouzet.github.io/evoflownet"
-Repository = "https://github.com/SimonCrouzet/EvoFlowNet"
-Issues = "https://github.com/SimonCrouzet/EvoFlowNet/issues"
+Homepage = "https://github.com/SimonCrouzet/EvoGFN"
+Documentation = "https://simoncrouzet.github.io/evogfn"
+Repository = "https://github.com/SimonCrouzet/EvoGFN"
+Issues = "https://github.com/SimonCrouzet/EvoGFN/issues"
 
 [project.scripts]
-evoflownet = "evoflownet.cli.main:main"
+evogfn = "evogfn.cli.main:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/evoflownet"]
-# The YAML under src/evoflownet/configs is picked up by the packages entry
+packages = ["src/evogfn"]
+# The YAML under src/evogfn/configs is picked up by the packages entry
 # above, since it lives inside the package. A force-include would duplicate it
 # and hatchling refuses to write the same path twice.
 
@@ -115,7 +115,7 @@ markers = [
 filterwarnings = ["error"]
 
 [tool.coverage.run]
-source = ["src/evoflownet"]
+source = ["src/evogfn"]
 branch = true
 
 [tool.coverage.report]

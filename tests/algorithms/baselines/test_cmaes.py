@@ -12,10 +12,10 @@ everything scored -inf. Each has its own test.
 import numpy as np
 import pytest
 
-from evoflownet.algorithms.base import Sampler
-from evoflownet.algorithms.baselines import CMAES
-from evoflownet.core import Alphabet
-from evoflownet.env.mutation import MutationEnvironment
+from evogfn.algorithms.base import Sampler
+from evogfn.algorithms.baselines import CMAES
+from evogfn.core import Alphabet
+from evogfn.env.mutation import MutationEnvironment
 
 
 def make_env(length=6, symbols="ABCD", max_mutations=3, transitions=None):

@@ -12,7 +12,7 @@ with ``-m "not requires_data"``.
 import numpy as np
 import pytest
 
-from evoflownet.landscapes.trpb import (
+from evogfn.landscapes.trpb import (
     TRPB_N_MEASURED,
     TRPB_POSITIONS,
     TRPB_WILD_TYPE,
@@ -140,7 +140,7 @@ class TestDistinctFromGB1:
         # The point of adding TrpB is a second landscape of the same shape whose
         # numbers are unrelated, so a method tuned to GB1's reward geometry has
         # nowhere to hide.
-        gb1 = pytest.importorskip("evoflownet.landscapes.gb1").GB1Landscape()
+        gb1 = pytest.importorskip("evogfn.landscapes.gb1").GB1Landscape()
         assert landscape.sequence_length == gb1.sequence_length
         assert landscape.alphabet == gb1.alphabet
         assert landscape.optimal_variant != gb1.optimal_variant

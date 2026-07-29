@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 import torch
 
-from evoflownet.algorithms.gflownet import (
+from evogfn.algorithms.gflownet import (
     DetailedBalance,
     ForwardLookingDetailedBalance,
     SubTrajectoryBalance,
@@ -20,12 +20,12 @@ from evoflownet.algorithms.gflownet import (
     sample_trajectories,
     train_trajectory_balance,
 )
-from evoflownet.algorithms.gflownet.sampling import Trajectories
-from evoflownet.core.types import Alphabet
-from evoflownet.env.mutation import MutationEnvironment
-from evoflownet.landscapes.base import FitnessLandscape
-from evoflownet.models.policy import SequencePolicy
-from evoflownet.rewards import TemperedReward
+from evogfn.algorithms.gflownet.sampling import Trajectories
+from evogfn.core.types import Alphabet
+from evogfn.env.mutation import MutationEnvironment
+from evogfn.landscapes.base import FitnessLandscape
+from evogfn.models.policy import SequencePolicy
+from evogfn.rewards import TemperedReward
 
 ALPHABET = Alphabet.from_string("ACGT")
 LENGTH = 4

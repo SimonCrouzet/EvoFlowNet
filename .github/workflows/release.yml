@@ -52,7 +52,7 @@ jobs:
     # and an irreversible upload, and scopes the trusted-publishing identity.
     environment:
       name: pypi
-      url: https://pypi.org/p/evoflownet
+      url: https://pypi.org/p/evogfn
     permissions:
       id-token: write # OIDC token for trusted publishing
       attestations: write # signed provenance for the uploaded files

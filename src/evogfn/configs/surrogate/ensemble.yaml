@@ -1,0 +1,8 @@
+# Deep ensemble, following Jain et al. (ICML 2022): five MLPs whose
+# disagreement is the uncertainty estimate.
+_target_: evogfn.surrogate.ensemble.DeepEnsemble
+n_members: 5
+hidden_dim: 128
+n_layers: 2
+epochs: 150
+learning_rate: 1e-3

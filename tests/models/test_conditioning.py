@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from evoflownet.models.conditioning import (
+from evogfn.models.conditioning import (
     encoding_dim,
     preference_encoding,
     sample_preferences,

@@ -27,19 +27,19 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from evoflownet.algorithms.gflownet.objectives import TrajectoryBalance
-from evoflownet.algorithms.gflownet.sampling import sample_trajectories
-from evoflownet.algorithms.gflownet.training import TrainingConfig, train_trajectory_balance
-from evoflownet.env.mutation import MutationEnvironment
-from evoflownet.landscapes.ehrlich import EhrlichLandscape
-from evoflownet.metrics.distribution import (
+from evogfn.algorithms.gflownet.objectives import TrajectoryBalance
+from evogfn.algorithms.gflownet.sampling import sample_trajectories
+from evogfn.algorithms.gflownet.training import TrainingConfig, train_trajectory_balance
+from evogfn.env.mutation import MutationEnvironment
+from evogfn.landscapes.ehrlich import EhrlichLandscape
+from evogfn.metrics.distribution import (
     empirical_distribution,
     expected_l1_from_sampling_noise,
     l1_distance,
     target_distribution,
 )
-from evoflownet.models.policy import SequencePolicy
-from evoflownet.rewards.base import TemperedReward
+from evogfn.models.policy import SequencePolicy
+from evogfn.rewards.base import TemperedReward
 
 # %% [markdown]
 # ## The mutation lattice
@@ -202,7 +202,7 @@ print(f"oracle calls used: {result.oracle_calls:,}")
 # %% [markdown]
 # **That oracle-call count is the reason a campaign never trains this way.** Four
 # hundred steps at batch 64 is 25,600 evaluations — sixty-plus times a realistic
-# campaign's entire budget. In `evoflownet.loop`, the GFlowNet trains against a
+# campaign's entire budget. In `evogfn.loop`, the GFlowNet trains against a
 # *surrogate proxy* fitted to what has actually been measured, and the real oracle
 # is spent only on the selected batch. Notebook 4 shows that. Here we hand it the
 # true landscape because the point is to check the distribution, and for that we
@@ -228,7 +228,7 @@ print(f"oracle calls used: {result.oracle_calls:,}")
 # %%
 def reachable_terminals(environment) -> np.ndarray:
     """Breadth-first over the masked construction graph from the parent."""
-    from evoflownet.env.base import State  # noqa: PLC0415 - only needed here
+    from evogfn.env.base import State  # noqa: PLC0415 - only needed here
 
     start = environment.parent
     seen = {start.tobytes(): start}

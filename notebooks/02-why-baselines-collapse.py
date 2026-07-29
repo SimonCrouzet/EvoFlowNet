@@ -35,11 +35,11 @@ from __future__ import annotations
 
 import numpy as np
 
-from evoflownet.algorithms.baselines.genetic import GeneticAlgorithm
-from evoflownet.algorithms.baselines.mutagenesis import HillClimbing, RandomMutagenesis
-from evoflownet.env.mutation import MutationEnvironment
-from evoflownet.landscapes.ehrlich import EhrlichLandscape
-from evoflownet.metrics.diversity import diversity
+from evogfn.algorithms.baselines.genetic import GeneticAlgorithm
+from evogfn.algorithms.baselines.mutagenesis import HillClimbing, RandomMutagenesis
+from evogfn.env.mutation import MutationEnvironment
+from evogfn.landscapes.ehrlich import EhrlichLandscape
+from evogfn.metrics.diversity import diversity
 
 ROUNDS = 4
 BATCH = 48
@@ -50,7 +50,7 @@ MAX_MUTATIONS = 4
 #
 # This is what a design-build-test-learn round is, stripped of everything
 # optional. The sampler proposes, the oracle scores exactly the batch, the sampler
-# is told what happened. `Campaign` in `evoflownet.loop` adds a surrogate, an
+# is told what happened. `Campaign` in `evogfn.loop` adds a surrogate, an
 # acquisition rule and deduplication on top of this; nothing else changes.
 
 

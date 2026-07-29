@@ -10,8 +10,8 @@ initialisation.
 import numpy as np
 import pytest
 
-from evoflownet.core.types import Alphabet
-from evoflownet.surrogate import DeepEnsemble, ProxyLandscape
+from evogfn.core.types import Alphabet
+from evogfn.surrogate import DeepEnsemble, ProxyLandscape
 
 ALPHABET = Alphabet.from_string("ACGT")
 LENGTH = 4

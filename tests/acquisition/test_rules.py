@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pytest
 
-from evoflownet.acquisition import (
+from evogfn.acquisition import (
     DiverseTopK,
     ExpectedImprovement,
     Greedy,
@@ -13,7 +13,7 @@ from evoflownet.acquisition import (
     TopK,
     UpperConfidenceBound,
 )
-from evoflownet.metrics import diversity
+from evogfn.metrics import diversity
 
 
 class TestAcquisitionRules:

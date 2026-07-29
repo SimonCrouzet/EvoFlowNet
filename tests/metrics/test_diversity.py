@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from evoflownet.metrics import distinct_modes, diversity, hamming_distances, novelty
+from evogfn.metrics import distinct_modes, diversity, hamming_distances, novelty
 
 
 def seqs(*rows):

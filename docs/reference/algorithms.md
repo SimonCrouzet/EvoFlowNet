@@ -5,47 +5,47 @@ compared against run through different harnesses is not a comparison — the bud
 drifts, the stopping conditions differ, and the result measures the harness as much as the
 method.
 
-::: evoflownet.algorithms.base
+::: evogfn.algorithms.base
 
 ## GFlowNets
 
-::: evoflownet.algorithms.gflownet.sampler
+::: evogfn.algorithms.gflownet.sampler
 
-::: evoflownet.algorithms.gflownet.training
+::: evogfn.algorithms.gflownet.training
 
-::: evoflownet.algorithms.gflownet.sampling
+::: evogfn.algorithms.gflownet.sampling
 
-::: evoflownet.algorithms.gflownet.objectives
+::: evogfn.algorithms.gflownet.objectives
 
-::: evoflownet.algorithms.gflownet.flow_objectives
+::: evogfn.algorithms.gflownet.flow_objectives
 
-::: evoflownet.algorithms.gflownet.genetic_gfn
+::: evogfn.algorithms.gflownet.genetic_gfn
 
-::: evoflownet.algorithms.gflownet.replay
+::: evogfn.algorithms.gflownet.replay
 
-::: evoflownet.algorithms.gflownet.trajectory_balance
+::: evogfn.algorithms.gflownet.trajectory_balance
 
 ## Classical baselines
 
 Directed evolution *is* a genetic algorithm, so these are the incumbents rather than strawmen
 to be cleared.
 
-::: evoflownet.algorithms.baselines.mutagenesis
+::: evogfn.algorithms.baselines.mutagenesis
 
-::: evoflownet.algorithms.baselines.genetic
+::: evogfn.algorithms.baselines.genetic
 
-::: evoflownet.algorithms.baselines.annealing
+::: evogfn.algorithms.baselines.annealing
 
-::: evoflownet.algorithms.baselines.cmaes
+::: evogfn.algorithms.baselines.cmaes
 
-::: evoflownet.algorithms.baselines.mlde
+::: evogfn.algorithms.baselines.mlde
 
 ## Giving a baseline the same model access
 
-::: evoflownet.algorithms.inner_loop
+::: evogfn.algorithms.inner_loop
 
 ## The policy network
 
-::: evoflownet.models.policy
+::: evogfn.models.policy
 
-::: evoflownet.models.conditioning
+::: evogfn.models.conditioning

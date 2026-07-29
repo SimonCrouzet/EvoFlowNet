@@ -9,15 +9,15 @@ own calls, and the sampler counts the proxy's.
 import numpy as np
 import pytest
 
-from evoflownet.algorithms.base import Sampler
-from evoflownet.algorithms.gflownet import GFlowNetSampler, TrainingConfig
-from evoflownet.core.types import Alphabet
-from evoflownet.env.mutation import MutationEnvironment
-from evoflownet.landscapes.base import FitnessLandscape
-from evoflownet.loop import Campaign
-from evoflownet.models.policy import SequencePolicy
-from evoflownet.rewards import TemperedReward
-from evoflownet.surrogate import DeepEnsemble, ProxyLandscape
+from evogfn.algorithms.base import Sampler
+from evogfn.algorithms.gflownet import GFlowNetSampler, TrainingConfig
+from evogfn.core.types import Alphabet
+from evogfn.env.mutation import MutationEnvironment
+from evogfn.landscapes.base import FitnessLandscape
+from evogfn.loop import Campaign
+from evogfn.models.policy import SequencePolicy
+from evogfn.rewards import TemperedReward
+from evogfn.surrogate import DeepEnsemble, ProxyLandscape
 
 ALPHABET = Alphabet.from_string("ACGT")
 LENGTH = 4

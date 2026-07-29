@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from evoflownet.tracking import (
+from evogfn.tracking import (
     ConsoleTracker,
     MultiTracker,
     NoOpTracker,
@@ -150,7 +150,7 @@ class TestProvenance:
     def test_it_records_what_a_result_needs_to_be_reproducible(self):
         provenance = run_provenance(seed=3)
         assert provenance["seed"] == 3
-        assert provenance["evoflownet_version"]
+        assert provenance["evogfn_version"]
         assert provenance["python"]
         assert "git" in provenance
 

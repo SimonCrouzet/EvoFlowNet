@@ -33,7 +33,7 @@ body:
     id: environment
     attributes:
       label: Environment
-      description: "Output of: `uv run python -c \"import evoflownet, torch, sys; print(evoflownet.__version__, torch.__version__, sys.version)\"`"
+      description: "Output of: `uv run python -c \"import evogfn, torch, sys; print(evogfn.__version__, torch.__version__, sys.version)\"`"
       render: shell
     validations:
       required: true

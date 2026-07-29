@@ -11,15 +11,15 @@ import numpy as np
 import pytest
 import torch
 
-from evoflownet.algorithms.gflownet import (
+from evogfn.algorithms.gflownet import (
     ContrastiveBalance,
     TrajectoryBalance,
     balance_violation,
     sample_trajectories,
 )
-from evoflownet.core import Alphabet
-from evoflownet.env.mutation import MutationEnvironment
-from evoflownet.models import SequencePolicy
+from evogfn.core import Alphabet
+from evogfn.env.mutation import MutationEnvironment
+from evogfn.models import SequencePolicy
 
 
 def make_env(length=4, symbols="ABC", max_mutations=2):

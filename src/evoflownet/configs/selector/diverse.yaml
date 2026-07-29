@@ -1,4 +1,0 @@
-# Trades predicted value against distance to what is already selected. At
-# penalty 0 this is exactly TopK, so the comparison is one knob.
-_target_: evoflownet.acquisition.rules.DiverseTopK
-penalty: 1.0

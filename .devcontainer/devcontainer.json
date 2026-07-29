@@ -6,7 +6,7 @@
   // The container deliberately installs the CPU build. A Codespace has no GPU,
   // and the CUDA wheels are 4.7GB against 1.1GB -- paying that to sit unused is
   // the single largest thing that would make first-run experience bad.
-  "name": "EvoFlowNet",
+  "name": "EvoGFN",
 
   // Matches the project's mypy target and sits inside the supported 3.11-3.13
   // range. The CI matrix is what guarantees the other two still work.

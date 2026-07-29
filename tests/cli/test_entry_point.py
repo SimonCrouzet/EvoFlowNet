@@ -1,7 +1,7 @@
 """Tests for the installed command line entry point.
 
 The console script declared in pyproject.toml previously pointed at a module
-that did not exist, so ``pip install evoflownet && evoflownet`` failed with a
+that did not exist, so ``pip install evogfn && evogfn`` failed with a
 ModuleNotFoundError. Neither the build job nor ``twine check`` caught it,
 because neither runs the script. These tests do.
 """
@@ -13,14 +13,14 @@ from pathlib import Path
 
 import pytest
 
-import evoflownet.cli.main as cli_module
-from evoflownet.cli.main import _USAGE, COMMANDS, main
+import evogfn.cli.main as cli_module
+from evogfn.cli.main import _USAGE, COMMANDS, main
 
 
 def run_cli(*arguments, cwd=None):
     """Invoke the entry point the way an installed user would."""
     return subprocess.run(  # noqa: S603 - fixed arguments, no shell
-        [sys.executable, "-m", "evoflownet.cli.main", *arguments],
+        [sys.executable, "-m", "evogfn.cli.main", *arguments],
         capture_output=True,
         text=True,
         timeout=600,
@@ -37,7 +37,7 @@ class TestTheScriptActuallyRuns:
 
     def test_invoking_it_with_no_arguments_prints_usage(self, capsys):
         assert main([]) == 0
-        assert "usage: evoflownet" in capsys.readouterr().out
+        assert "usage: evogfn" in capsys.readouterr().out
 
     def test_help_is_not_an_error(self, capsys):
         assert main(["--help"]) == 0
@@ -59,7 +59,7 @@ class TestTheScriptActuallyRuns:
         # install: catches import-time errors the in-process test cannot.
         result = run_cli()
         assert result.returncode == 0
-        assert "usage: evoflownet" in result.stdout
+        assert "usage: evogfn" in result.stdout
 
 
 @pytest.mark.slow
@@ -94,7 +94,7 @@ class TestTraining:
             f"hydra.run.dir={tmp_path / 'run'}",
         )
         assert result.returncode == 0, result.stderr
-        for field in ("evoflownet_version", "git", "commit", "dirty", "seed"):
+        for field in ("evogfn_version", "git", "commit", "dirty", "seed"):
             assert field in result.stderr
 
     def test_a_component_can_be_swapped_from_the_command_line(self, tmp_path):
@@ -120,13 +120,13 @@ class TestPackagedConfiguration:
         # Hydra composes a run from these at import time of the installed
         # package. If they are not packaged, the CLI works from a checkout and
         # fails for everyone who installs it -- the worst kind of defect.
-        configs = files("evoflownet.configs")
+        configs = files("evogfn.configs")
         assert configs.joinpath("train.yaml").is_file()
         for group in ("landscape", "env", "reward", "policy", "training", "tracker"):
             assert configs.joinpath(group).is_dir(), f"missing config group {group}"
 
     def test_every_config_group_referenced_by_the_default_run_exists(self):
-        configs = Path(str(files("evoflownet.configs")))
+        configs = Path(str(files("evogfn.configs")))
         text = (configs / "train.yaml").read_text()
         for line in text.splitlines():
             stripped = line.strip()

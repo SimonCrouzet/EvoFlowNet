@@ -5,8 +5,8 @@
 Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-git clone https://github.com/SimonCrouzet/EvoFlowNet
-cd EvoFlowNet
+git clone https://github.com/SimonCrouzet/EvoGFN
+cd EvoGFN
 uv sync                  # GPU: the CUDA build of torch, ~4.7 GB
 uv sync --extra cpu      # CPU only, ~1.1 GB
 ```
@@ -17,7 +17,7 @@ for the optional protein-language-model oracles (`--extra plm`).
 A CUDA environment is around 4.7 GB. To keep it off the disk holding the checkout:
 
 ```bash
-export UV_PROJECT_ENVIRONMENT=/somewhere/with/room/evoflownet
+export UV_PROJECT_ENVIRONMENT=/somewhere/with/room/evogfn
 ```
 
 !!! tip "Zero-install"
@@ -30,7 +30,7 @@ export UV_PROJECT_ENVIRONMENT=/somewhere/with/room/evoflownet
 ## Run something in one minute
 
 ```bash
-uv run evoflownet campaign landscape=ehrlich
+uv run evogfn campaign landscape=ehrlich
 ```
 
 That runs a design–build–test–learn campaign: four rounds of 96 measured variants, a deep
@@ -43,10 +43,10 @@ which downloads ~3 MB of real deep-mutational-scanning data on first use and cac
 Every part of the run is a Hydra override:
 
 ```bash
-uv run evoflownet campaign sampler=genetic acquisition=ucb selector=diverse
-uv run evoflownet campaign campaign.rounds=8 campaign.batch_size=48
-uv run evoflownet campaign tracker=noop
-uv run evoflownet campaign --help               # every configurable option
+uv run evogfn campaign sampler=genetic acquisition=ucb selector=diverse
+uv run evogfn campaign campaign.rounds=8 campaign.batch_size=48
+uv run evogfn campaign tracker=noop
+uv run evogfn campaign --help               # every configurable option
 ```
 
 The groups you can swap are `landscape`, `env`, `reward`, `policy`, `training`, `objective`,
@@ -56,9 +56,9 @@ The groups you can swap are `landscape`, `env`, `reward`, `policy`, `training`, 
 To train a policy on its own, against the landscape rather than inside a campaign:
 
 ```bash
-uv run evoflownet train
-uv run evoflownet train landscape=gb1 training.steps=5000
-uv run evoflownet train reward.beta=1.0 tracker=noop
+uv run evogfn train
+uv run evogfn train landscape=gb1 training.steps=5000
+uv run evogfn train reward.beta=1.0 tracker=noop
 ```
 
 !!! warning "`train` and `campaign` charge the oracle very differently"
@@ -74,16 +74,16 @@ uv run evoflownet train reward.beta=1.0 tracker=noop
 ## The same thing in Python
 
 ```python
-from evoflownet.acquisition.rules import Greedy, TopK
-from evoflownet.algorithms.gflownet.sampler import GFlowNetSampler
-from evoflownet.algorithms.gflownet.training import TrainingConfig
-from evoflownet.env.mutation import MutationEnvironment
-from evoflownet.landscapes.ehrlich import EhrlichLandscape
-from evoflownet.loop.campaign import Campaign
-from evoflownet.models.policy import SequencePolicy
-from evoflownet.rewards.base import TemperedReward
-from evoflownet.surrogate.ensemble import DeepEnsemble
-from evoflownet.surrogate.proxy import ProxyLandscape
+from evogfn.acquisition.rules import Greedy, TopK
+from evogfn.algorithms.gflownet.sampler import GFlowNetSampler
+from evogfn.algorithms.gflownet.training import TrainingConfig
+from evogfn.env.mutation import MutationEnvironment
+from evogfn.landscapes.ehrlich import EhrlichLandscape
+from evogfn.loop.campaign import Campaign
+from evogfn.models.policy import SequencePolicy
+from evogfn.rewards.base import TemperedReward
+from evogfn.surrogate.ensemble import DeepEnsemble
+from evogfn.surrogate.proxy import ProxyLandscape
 
 landscape = EhrlichLandscape(sequence_length=32, vocab_size=20, seed=7)
 
@@ -144,8 +144,8 @@ metric in the library works against it.
 ```python
 import numpy as np
 
-from evoflownet.core.types import Alphabet
-from evoflownet.landscapes.base import FitnessLandscape
+from evogfn.core.types import Alphabet
+from evogfn.landscapes.base import FitnessLandscape
 
 
 class MyAssay(FitnessLandscape):
@@ -203,7 +203,7 @@ uv run python notebooks/01-landscapes-and-epistasis.py
 uvx jupytext --to notebook notebooks/01-landscapes-and-epistasis.py   # if you want .ipynb
 ```
 
-See [`CONTRIBUTING.md`](https://github.com/SimonCrouzet/EvoFlowNet/blob/main/CONTRIBUTING.md)
+See [`CONTRIBUTING.md`](https://github.com/SimonCrouzet/EvoGFN/blob/main/CONTRIBUTING.md)
 for conventions. The short version: public functions need Google-style docstrings that say
 *why*, mathematical notation should match the paper it came from, and new behaviour needs a
 test that fails without the change — preferably against a known correct answer, since the

@@ -6,7 +6,7 @@
 # else — environments, samplers, campaigns — exists to decide *which* sequences to
 # hand it, because handing it a sequence is what costs money.
 #
-# This notebook builds the two landscapes that ship with EvoFlowNet and shows the
+# This notebook builds the two landscapes that ship with EvoGFN and shows the
 # three properties that make them worth benchmarking on:
 #
 # 1. **Epistasis** — why the fitness of a variant is not the sum of its mutations.
@@ -30,8 +30,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from evoflownet.env.mutation import MutationEnvironment
-from evoflownet.landscapes.ehrlich import EhrlichLandscape
+from evogfn.env.mutation import MutationEnvironment
+from evogfn.landscapes.ehrlich import EhrlichLandscape
 
 RNG = np.random.default_rng(0)
 
@@ -235,7 +235,7 @@ for length in (4, 8, 16, 32, 64):
 # and the closed form says why. A method that proposes designs and filters
 # afterwards is, at these lengths, proposing nothing at all.
 #
-# EvoFlowNet's answer is to fold the constraint into the *construction graph*, so
+# EvoGFN's answer is to fold the constraint into the *construction graph*, so
 # infeasible designs are never generated — notebook 3. Notebook 2 measures what
 # happens when you do not.
 
@@ -284,7 +284,7 @@ print(f"...of which feasible   {int(landscape.is_feasible(reachable).sum()):,}")
 
 # %%
 try:
-    from evoflownet.landscapes.gb1 import GB1Landscape
+    from evogfn.landscapes.gb1 import GB1Landscape
 
     gb1 = GB1Landscape()
 except Exception as error:

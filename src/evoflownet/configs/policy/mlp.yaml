@@ -1,7 +1,0 @@
-_target_: evoflownet.models.policy.SequencePolicy
-embedding_dim: 32
-hidden_dim: 256
-n_layers: 2
-# Uniform P_B is exact on the subset lattice and needs no network. Set true to
-# run the learned-P_B ablation.
-learn_backward: false
