@@ -3,8 +3,8 @@
 import numpy as np
 import pytest
 
-from evoflownet.landscapes import EhrlichLandscape
-from evoflownet.landscapes.wrappers import (
+from evogfn.landscapes import EhrlichLandscape
+from evogfn.landscapes.wrappers import (
     Budgeted,
     BudgetExhaustedError,
     Cached,

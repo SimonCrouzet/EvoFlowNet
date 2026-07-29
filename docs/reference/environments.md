@@ -8,6 +8,6 @@ It is also where feasibility lives. A constructibility constraint handed to the 
 becomes an action mask, so infeasible designs are never generated rather than filtered
 afterwards — see [notebook 3](../notebooks.md).
 
-::: evoflownet.env.base
+::: evogfn.env.base
 
-::: evoflownet.env.mutation
+::: evogfn.env.mutation

@@ -6,10 +6,10 @@ Best-found, top-K and diversity are all satisfied by an optimiser that never sam
 Comparing an empirical distribution against the exact target `p*(x) ∝ R(x)^β` is not — and it
 is why the landscapes here were chosen to be enumerable.
 
-::: evoflownet.metrics.performance
+::: evogfn.metrics.performance
 
-::: evoflownet.metrics.diversity
+::: evogfn.metrics.diversity
 
-::: evoflownet.metrics.distribution
+::: evogfn.metrics.distribution
 
-::: evoflownet.metrics.pareto
+::: evogfn.metrics.pareto

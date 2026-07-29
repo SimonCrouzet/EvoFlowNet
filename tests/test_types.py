@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from evoflownet.core import Alphabet
+from evogfn.core import Alphabet
 
 
 class TestConstruction:

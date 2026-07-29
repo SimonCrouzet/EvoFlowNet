@@ -20,8 +20,8 @@ is asserted rather than described, so the handicap cannot quietly disappear.
 import numpy as np
 import pytest
 
-from evoflownet.algorithms.base import Sampler
-from evoflownet.algorithms.baselines import (
+from evogfn.algorithms.base import Sampler
+from evogfn.algorithms.baselines import (
     MLDE,
     PUBLISHED_BATCH_SIZE,
     PUBLISHED_BUDGET,
@@ -30,8 +30,8 @@ from evoflownet.algorithms.baselines import (
     PUBLISHED_TRAINING_SIZE,
     RandomMutagenesis,
 )
-from evoflownet.core import Alphabet
-from evoflownet.env.mutation import MutationEnvironment
+from evogfn.core import Alphabet
+from evogfn.env.mutation import MutationEnvironment
 
 #: The repository's four-plate campaign budget, which MLDE-as-published exceeds.
 FOUR_PLATE_BUDGET = 384

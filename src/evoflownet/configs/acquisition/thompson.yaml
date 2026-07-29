@@ -1,3 +1,0 @@
-# One draw from the predictive distribution per candidate; what ALDE uses.
-_target_: evoflownet.acquisition.rules.Thompson
-seed: 0

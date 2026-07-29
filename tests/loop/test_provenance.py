@@ -11,13 +11,13 @@ import csv
 import numpy as np
 import pytest
 
-from evoflownet.algorithms.base import Sampler
-from evoflownet.core.types import Alphabet
-from evoflownet.landscapes.base import FitnessLandscape
-from evoflownet.loop import Campaign
-from evoflownet.loop.provenance import FIELDS
-from evoflownet.surrogate import DeepEnsemble
-from evoflownet.tracking.base import Tracker
+from evogfn.algorithms.base import Sampler
+from evogfn.core.types import Alphabet
+from evogfn.landscapes.base import FitnessLandscape
+from evogfn.loop import Campaign
+from evogfn.loop.provenance import FIELDS
+from evogfn.surrogate import DeepEnsemble
+from evogfn.tracking.base import Tracker
 
 ALPHABET = Alphabet.from_string("ACGT")
 LENGTH = 5

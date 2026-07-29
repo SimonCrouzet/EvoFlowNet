@@ -4,18 +4,18 @@ Running comparisons so that the numbers mean what the table says they mean. See
 [The benchmark suite](../benchmark.md) for what each task decides, and
 [what this does not show](../limitations.md) for what the results do and do not support.
 
-::: evoflownet.benchmark.protocol
+::: evogfn.benchmark.protocol
 
-::: evoflownet.benchmark.tasks
+::: evogfn.benchmark.tasks
 
-::: evoflownet.benchmark.suite
+::: evogfn.benchmark.suite
 
-::: evoflownet.benchmark.methods
+::: evogfn.benchmark.methods
 
-::: evoflownet.benchmark.harness
+::: evogfn.benchmark.harness
 
-::: evoflownet.benchmark.statistics
+::: evogfn.benchmark.statistics
 
-::: evoflownet.benchmark.store
+::: evogfn.benchmark.store
 
-::: evoflownet.benchmark.determinism
+::: evogfn.benchmark.determinism

@@ -12,22 +12,22 @@ import numpy as np
 import pytest
 import torch
 
-from evoflownet.algorithms.gflownet import (
+from evogfn.algorithms.gflownet import (
     parameter_groups,
     sample_trajectories,
     trajectory_balance_loss,
 )
-from evoflownet.core import Alphabet
-from evoflownet.env.base import State
-from evoflownet.env.mutation import MutationEnvironment
-from evoflownet.metrics import (
+from evogfn.core import Alphabet
+from evogfn.env.base import State
+from evogfn.env.mutation import MutationEnvironment
+from evogfn.metrics import (
     empirical_distribution,
     expected_l1_from_sampling_noise,
     l1_distance,
     target_distribution,
 )
-from evoflownet.models import SequencePolicy
-from evoflownet.rewards import TemperedReward
+from evogfn.models import SequencePolicy
+from evogfn.rewards import TemperedReward
 
 
 def make_env(length=4, symbols="ABC", max_mutations=2):

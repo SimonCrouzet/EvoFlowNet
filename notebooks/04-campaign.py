@@ -9,7 +9,7 @@
 # * a **batch selector** choosing which candidates actually go to the assay,
 # * and a **budget** that only the assay is charged against.
 #
-# `evoflownet.loop.Campaign` runs that loop identically for every sampler, so a
+# `evogfn.loop.Campaign` runs that loop identically for every sampler, so a
 # difference between runs is a difference between methods rather than between
 # harnesses. This notebook runs two campaigns at the same budget, then reads the
 # per-round artifacts back off disk.
@@ -44,18 +44,18 @@ from pathlib import Path
 
 import numpy as np
 
-from evoflownet.acquisition.rules import TopK, UpperConfidenceBound
-from evoflownet.algorithms.baselines.genetic import GeneticAlgorithm
-from evoflownet.algorithms.gflownet.sampler import GFlowNetSampler
-from evoflownet.algorithms.gflownet.training import TrainingConfig
-from evoflownet.algorithms.inner_loop import ProxyOptimising
-from evoflownet.env.mutation import MutationEnvironment
-from evoflownet.landscapes.ehrlich import EhrlichLandscape
-from evoflownet.loop.campaign import Campaign
-from evoflownet.models.policy import SequencePolicy
-from evoflownet.rewards.base import TemperedReward
-from evoflownet.surrogate.ensemble import DeepEnsemble
-from evoflownet.surrogate.proxy import ProxyLandscape
+from evogfn.acquisition.rules import TopK, UpperConfidenceBound
+from evogfn.algorithms.baselines.genetic import GeneticAlgorithm
+from evogfn.algorithms.gflownet.sampler import GFlowNetSampler
+from evogfn.algorithms.gflownet.training import TrainingConfig
+from evogfn.algorithms.inner_loop import ProxyOptimising
+from evogfn.env.mutation import MutationEnvironment
+from evogfn.landscapes.ehrlich import EhrlichLandscape
+from evogfn.loop.campaign import Campaign
+from evogfn.models.policy import SequencePolicy
+from evogfn.rewards.base import TemperedReward
+from evogfn.surrogate.ensemble import DeepEnsemble
+from evogfn.surrogate.proxy import ProxyLandscape
 
 ROUNDS = 3
 BATCH = 24
@@ -161,7 +161,7 @@ def genetic_arm(artifact_dir: Path) -> Campaign:
 
 
 # %%
-workspace = Path(tempfile.mkdtemp(prefix="evoflownet-notebook-"))
+workspace = Path(tempfile.mkdtemp(prefix="evogfn-notebook-"))
 campaigns = {}
 results = {}
 for name, build in (("gflownet", gflownet_arm), ("genetic+proxy", genetic_arm)):
@@ -301,10 +301,10 @@ for name, result in results.items():
 # The same campaign is a CLI invocation, composed by Hydra:
 #
 # ```bash
-# evoflownet campaign
-# evoflownet campaign sampler=genetic acquisition=ucb selector=diverse
-# evoflownet campaign campaign.rounds=8 campaign.batch_size=48
-# evoflownet campaign --help      # every configurable option
+# evogfn campaign
+# evogfn campaign sampler=genetic acquisition=ucb selector=diverse
+# evogfn campaign campaign.rounds=8 campaign.batch_size=48
+# evogfn campaign --help      # every configurable option
 # ```
 #
 # and the full benchmark suite, which is resumable and writes each campaign as it

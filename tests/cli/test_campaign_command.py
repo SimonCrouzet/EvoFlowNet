@@ -9,7 +9,7 @@ groups, the sampler names, and the feasibility matrix reaching the environment.
 
 import pytest
 
-from evoflownet.cli.main import COMMANDS, SAMPLERS, main
+from evogfn.cli.main import COMMANDS, SAMPLERS, main
 
 BASE = [
     "campaign",

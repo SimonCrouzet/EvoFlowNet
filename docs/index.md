@@ -1,6 +1,6 @@
-# EvoFlowNet
+# EvoGFN
 
-**EvoFlowNet** is a Python library for in-silico directed evolution with Generative Flow
+**EvoGFN** is a Python library for in-silico directed evolution with Generative Flow
 Networks (GFlowNets). It generates batches of sequence variants that are diverse and
 high-fitness at the same time, rather than many near-copies of a single best hit.
 
@@ -103,7 +103,7 @@ Copyright © 2026 Simon J. Crouzet. Licensed under the **Apache License 2.0**. Y
 modify and distribute this software including for commercial purposes, provided you preserve
 the copyright notice and licence text.
 
-If you use EvoFlowNet in your work, please credit the project and feel free to get in touch —
+If you use EvoGFN in your work, please credit the project and feel free to get in touch —
 [@simoncrouzet](https://github.com/simoncrouzet).
 
 ---

@@ -10,8 +10,8 @@ name. Each of those is tested separately.
 import numpy as np
 import pytest
 
-from evoflownet.algorithms.baselines.genetic import GeneticAlgorithm
-from evoflownet.algorithms.gflownet import (
+from evogfn.algorithms.baselines.genetic import GeneticAlgorithm
+from evogfn.algorithms.gflownet import (
     ContrastiveBalance,
     DetailedBalance,
     GeneticConfig,
@@ -20,11 +20,11 @@ from evoflownet.algorithms.gflownet import (
     train_genetic_gfn,
     train_trajectory_balance,
 )
-from evoflownet.core.types import Alphabet
-from evoflownet.env.mutation import MutationEnvironment
-from evoflownet.landscapes.base import FitnessLandscape
-from evoflownet.models.policy import SequencePolicy
-from evoflownet.rewards import TemperedReward
+from evogfn.core.types import Alphabet
+from evogfn.env.mutation import MutationEnvironment
+from evogfn.landscapes.base import FitnessLandscape
+from evogfn.models.policy import SequencePolicy
+from evogfn.rewards import TemperedReward
 
 ALPHABET = Alphabet.from_string("ACGT")
 LENGTH = 6

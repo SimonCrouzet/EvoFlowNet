@@ -8,8 +8,8 @@ overrides them cannot show whether they work.
 import numpy as np
 import pytest
 
-from evoflownet.core import Alphabet
-from evoflownet.landscapes.base import FitnessLandscape
+from evogfn.core import Alphabet
+from evogfn.landscapes.base import FitnessLandscape
 
 
 class CountingLandscape(FitnessLandscape):

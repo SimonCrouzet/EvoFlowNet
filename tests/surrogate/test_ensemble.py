@@ -9,7 +9,7 @@ function relies on the spread to know that.
 import numpy as np
 import pytest
 
-from evoflownet.surrogate import DeepEnsemble
+from evogfn.surrogate import DeepEnsemble
 
 
 def additive_landscape(sequences):

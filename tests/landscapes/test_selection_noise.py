@@ -17,9 +17,9 @@ prove nothing about this one.
 import numpy as np
 import pytest
 
-from evoflownet.core.types import Alphabet
-from evoflownet.landscapes.base import FitnessLandscape
-from evoflownet.landscapes.wrappers import Noisy, SelectionNoisy
+from evogfn.core.types import Alphabet
+from evogfn.landscapes.base import FitnessLandscape
+from evogfn.landscapes.wrappers import Noisy, SelectionNoisy
 
 #: Sequences per band. Ten bands of 1,000 mirrors the size of the slice FLIGHTED
 #: reports on.

@@ -8,7 +8,7 @@ import hashlib
 
 import pytest
 
-from evoflownet.data.cache import (
+from evogfn.data.cache import (
     CACHE_ENV_VAR,
     ChecksumMismatchError,
     cache_dir,
@@ -42,7 +42,7 @@ class TestCacheLocation:
     def test_it_falls_back_to_xdg_cache_home(self, tmp_path, monkeypatch):
         monkeypatch.delenv(CACHE_ENV_VAR, raising=False)
         monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-        assert cache_dir() == tmp_path / "evoflownet"
+        assert cache_dir() == tmp_path / "evogfn"
 
     def test_the_cache_lives_outside_the_repository(self, monkeypatch):
         # A multi-megabyte dataset inside the checkout eventually gets committed

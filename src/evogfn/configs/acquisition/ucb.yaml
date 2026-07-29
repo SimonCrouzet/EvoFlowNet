@@ -1,0 +1,5 @@
+# kappa = 0.1 is Jain et al.'s published setting. Measured here to be
+# numerically indistinguishable from greedy at realistic ensemble spreads,
+# which is worth knowing before attributing a result to "exploration".
+_target_: evogfn.acquisition.rules.UpperConfidenceBound
+kappa: 0.1

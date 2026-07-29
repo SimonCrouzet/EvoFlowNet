@@ -21,9 +21,9 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from evoflownet.core import Alphabet
-from evoflownet.env.base import State
-from evoflownet.env.mutation import MutationEnvironment
+from evogfn.core import Alphabet
+from evogfn.env.base import State
+from evogfn.env.mutation import MutationEnvironment
 
 
 def make_env(length=4, symbols="ABC", max_mutations=None, transitions=None, allow_stop=True):

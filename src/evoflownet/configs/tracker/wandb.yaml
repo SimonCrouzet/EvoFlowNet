@@ -1,4 +1,0 @@
-_target_: evoflownet.tracking.wandb.WandbTracker
-project: evoflownet
-name: null
-entity: null

@@ -9,8 +9,8 @@ reporting a loss as though larger were better. Each has its own test.
 import numpy as np
 import pytest
 
-from evoflownet.algorithms.base import Sampler
-from evoflownet.benchmark import (
+from evogfn.algorithms.base import Sampler
+from evogfn.benchmark import (
     ML_CONVENTION,
     PLATE,
     WET_LAB_PROTOCOLS,
@@ -20,9 +20,9 @@ from evoflownet.benchmark import (
     run_benchmark,
     seeds_needed,
 )
-from evoflownet.core.types import Alphabet
-from evoflownet.landscapes.base import FitnessLandscape
-from evoflownet.loop import Campaign
+from evogfn.core.types import Alphabet
+from evogfn.landscapes.base import FitnessLandscape
+from evogfn.loop import Campaign
 
 ALPHABET = Alphabet.from_string("ACGT")
 LENGTH = 6

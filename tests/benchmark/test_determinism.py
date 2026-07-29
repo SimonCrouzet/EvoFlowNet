@@ -14,15 +14,15 @@ import os
 import pytest
 import torch
 
-from evoflownet.algorithms.gflownet.objectives import TrajectoryBalance
-from evoflownet.benchmark.determinism import (
+from evogfn.algorithms.gflownet.objectives import TrajectoryBalance
+from evogfn.benchmark.determinism import (
     THREAD_VARIABLES,
     configure_determinism,
     is_deterministic,
 )
-from evoflownet.benchmark.methods import gflownet
-from evoflownet.benchmark.suite import objective_task
-from evoflownet.models.policy import SequencePolicy
+from evogfn.benchmark.methods import gflownet
+from evogfn.benchmark.suite import objective_task
+from evogfn.models.policy import SequencePolicy
 
 
 def policy(seed=None):

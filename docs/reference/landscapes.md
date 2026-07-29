@@ -6,21 +6,21 @@ would recognise as ground truth: sequences in, numbers out, and every call charg
 Two are built in, chosen because their correct answers are known — which means you can check
 whether a method actually worked, not just whether it produced a plausible number.
 
-::: evoflownet.landscapes.base
+::: evogfn.landscapes.base
 
-::: evoflownet.landscapes.ehrlich
+::: evogfn.landscapes.ehrlich
 
-::: evoflownet.landscapes.gb1
+::: evogfn.landscapes.gb1
 
-::: evoflownet.landscapes.trpb
+::: evogfn.landscapes.trpb
 
 ## Wrappers
 
 Measurement noise, an evaluation budget and caching compose onto any landscape, so a budget
 cannot be accidentally bypassed and an exact oracle cannot be quietly assumed.
 
-::: evoflownet.landscapes.wrappers
+::: evogfn.landscapes.wrappers
 
 ## Types
 
-::: evoflownet.core.types
+::: evogfn.core.types

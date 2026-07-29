@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from evoflownet.benchmark.store import (
+from evogfn.benchmark.store import (
     ResultStore,
     RunRecord,
     dependency_closure,
@@ -66,7 +66,7 @@ def pkg(tmp_path, monkeypatch):
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(body)
-    monkeypatch.setattr("evoflownet.benchmark.store._package_root", lambda: root)
+    monkeypatch.setattr("evogfn.benchmark.store._package_root", lambda: root)
     return root
 
 

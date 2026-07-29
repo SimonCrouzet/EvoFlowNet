@@ -5,37 +5,37 @@
 Turning a prediction and an uncertainty into one number per candidate, and choosing the batch
 that number selects.
 
-::: evoflownet.acquisition.base
+::: evogfn.acquisition.base
 
-::: evoflownet.acquisition.rules
+::: evogfn.acquisition.rules
 
 ## Surrogates
 
 The model fitted to what has actually been measured, and the proxy that lets a sampler
 optimise against it without touching the oracle.
 
-::: evoflownet.surrogate.base
+::: evogfn.surrogate.base
 
-::: evoflownet.surrogate.ensemble
+::: evogfn.surrogate.ensemble
 
-::: evoflownet.surrogate.proxy
+::: evogfn.surrogate.proxy
 
 ## Rewards
 
-::: evoflownet.rewards.base
+::: evogfn.rewards.base
 
-::: evoflownet.rewards.scalarization
+::: evogfn.rewards.scalarization
 
 ## Tracking
 
-::: evoflownet.tracking.base
+::: evogfn.tracking.base
 
-::: evoflownet.tracking.console
+::: evogfn.tracking.console
 
-::: evoflownet.tracking.provenance
+::: evogfn.tracking.provenance
 
-::: evoflownet.tracking.wandb
+::: evogfn.tracking.wandb
 
 ## Data
 
-::: evoflownet.data.cache
+::: evogfn.data.cache

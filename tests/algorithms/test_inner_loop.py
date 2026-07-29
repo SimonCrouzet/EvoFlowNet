@@ -8,15 +8,15 @@ before there is a model to act on.
 import numpy as np
 import pytest
 
-from evoflownet.algorithms import ProxyOptimising
-from evoflownet.algorithms.base import Sampler
-from evoflownet.algorithms.baselines.genetic import GeneticAlgorithm
-from evoflownet.algorithms.baselines.mutagenesis import RandomMutagenesis
-from evoflownet.core.types import Alphabet
-from evoflownet.env.mutation import MutationEnvironment
-from evoflownet.landscapes.base import FitnessLandscape
-from evoflownet.loop import Campaign
-from evoflownet.surrogate import DeepEnsemble, ProxyLandscape
+from evogfn.algorithms import ProxyOptimising
+from evogfn.algorithms.base import Sampler
+from evogfn.algorithms.baselines.genetic import GeneticAlgorithm
+from evogfn.algorithms.baselines.mutagenesis import RandomMutagenesis
+from evogfn.core.types import Alphabet
+from evogfn.env.mutation import MutationEnvironment
+from evogfn.landscapes.base import FitnessLandscape
+from evogfn.loop import Campaign
+from evogfn.surrogate import DeepEnsemble, ProxyLandscape
 
 ALPHABET = Alphabet.from_string("ACGT")
 LENGTH = 6
