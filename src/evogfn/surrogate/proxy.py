@@ -1,12 +1,12 @@
 """A landscape backed by a surrogate, so a sampler can train without an oracle.
 
 This is the seam that keeps the budget honest. The GFlowNet trainer takes a
-:class:`~evogfn.landscapes.base.FitnessLandscape` and calls it thousands of
-times; pointing it at the real oracle would spend a 384-call campaign budget in
-the first few gradient steps. Wrapping the surrogate in the same interface lets
-the entire existing training path run unchanged against the proxy, and makes it
-structurally impossible to confuse the two -- a ``ProxyLandscape`` has no oracle
-to call.
+[FitnessLandscape][evogfn.landscapes.base.FitnessLandscape] and calls it
+thousands of times; pointing it at the real oracle would spend a 384-call
+campaign budget in the first few gradient steps. Wrapping the surrogate in the
+same interface lets the entire existing training path run unchanged against the
+proxy, and makes it structurally impossible to confuse the two -- a
+``ProxyLandscape`` has no oracle to call.
 
 This is what GFN-AL does, and what the design-build-test-learn loop means: the
 model is fitted on what the assay measured, the sampler is optimised against the

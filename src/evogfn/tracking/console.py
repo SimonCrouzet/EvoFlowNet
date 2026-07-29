@@ -26,8 +26,8 @@ class ConsoleTracker(Tracker):
         stream: Where to write. Defaults to stderr, so that metrics do not
             contaminate anything a caller is piping from stdout.
         every: Emit metrics on steps divisible by this. Step 0 and the final
-            call via :meth:`finish` are always emitted, so a short run is never
-            silent.
+            call via [finish][evogfn.tracking.console.ConsoleTracker.finish] are
+            always emitted, so a short run is never silent.
         precision: Decimal places for metric values.
 
     Raises:

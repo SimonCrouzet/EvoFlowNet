@@ -14,7 +14,7 @@ are identical across arms, and the only difference is the method. That is what
 makes the paired statistics valid rather than merely convenient.
 
 **Every arm runs the same protocol.** Rounds and batch size come from one
-:class:`~evogfn.benchmark.protocol.Protocol`, so no arm can be measured
+[Protocol][evogfn.benchmark.protocol.Protocol], so no arm can be measured
 against a different budget than the one it is reported at.
 
 **Actual spend is recorded, not assumed.** A sampler that cannot fill its plate

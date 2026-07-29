@@ -80,11 +80,12 @@ markdown_extensions:
   - pymdownx.inlinehilite
   - pymdownx.snippets
   - pymdownx.superfences
-  # Deliberately no math extension. mkdocstrings renders docstrings as
-  # Markdown, and the four modules carrying equations write them as
-  # reStructuredText `.. math::` blocks, which no Markdown math extension
-  # picks up. Configuring one would suggest the equations render when they do
-  # not. See the note on the home page.
+  # Four modules carry equations in their docstrings, written as `$...$` and
+  # `$$...$$`. Arithmatex in generic mode hands them to MathJax below rather
+  # than rendering them server-side, which is what keeps `\begin{aligned}`
+  # blocks working.
+  - pymdownx.arithmatex:
+      generic: true
 
 nav:
   - Home: index.md
@@ -100,6 +101,13 @@ nav:
       - Benchmark: reference/benchmark.md
       - Metrics: reference/metrics.md
       - Supporting pieces: reference/support.md
+
+extra_javascript:
+  # Arithmatex only marks the equations; MathJax is what draws them. The first
+  # file also re-typesets after an instant-navigation page swap, without which
+  # equations render on a full load and not on an in-site click.
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
 
 extra:
   social:

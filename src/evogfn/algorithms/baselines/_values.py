@@ -10,8 +10,8 @@ silently wrong for more: it yields ``n * n_objectives`` numbers, which then line
 up against ``n`` sequences by position and pair every design with somebody else's
 score. Nothing raises -- ``zip`` stops at the shorter side and the run completes
 with plausible, wrong numbers. This module refuses instead, matching
-:func:`evogfn.metrics.performance._as_flat` and
-:func:`evogfn.rewards.base._single_objective`, because the caller genuinely
+`evogfn.metrics.performance._as_flat` and
+`evogfn.rewards.base._single_objective`, because the caller genuinely
 has a decision to make: which scalarisation the ranking should use.
 """
 

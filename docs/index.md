@@ -68,14 +68,13 @@ and broken ones.
 
 </div>
 
-!!! note "A rough edge in the API reference"
-    The reference pages are generated from the docstrings in `src/`, and those were written
-    for a reStructuredText renderer while mkdocstrings renders Markdown. Cross-references
-    appear as literal `` :class:`Foo` `` rather than links, and the equations in
-    `landscapes.ehrlich`, `landscapes.wrappers`, `gflownet.objectives` and
-    `gflownet.flow_objectives` appear as literal `.. math::` blocks with LaTeX beneath them.
-    The text is correct and complete; only the markup is wrong. Reading those four modules'
-    docstrings in the source is currently a better experience than reading them here.
+!!! note "One gap in the API reference"
+    The reference pages are generated from the docstrings in `src/`. Module-level constants
+    — `MAX_ENUMERABLE_SIZE`, `MIN_BINS`, `WET_LAB_PROTOCOLS`, the `PUBLISHED_*` values in
+    `baselines.mlde` and the rest — are documented with `#:` comments, which the Markdown
+    docstring parser does not pick up, so they do not appear on these pages and references to
+    them read as plain names rather than links. Their values and the reasoning behind them are
+    in the source.
 
 ---
 

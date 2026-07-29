@@ -5,17 +5,17 @@ two reasons. Tests and CI must run with no account, no API key and no network,
 which a hard dependency makes impossible. And a benchmark that can only be
 reproduced by someone with access to one vendor's service is not reproducible.
 
-The default is :class:`~evogfn.tracking.console.ConsoleTracker`, which needs
-nothing. W&B is an opt-in adapter behind the ``wandb`` extra.
+The default is [ConsoleTracker][evogfn.tracking.console.ConsoleTracker], which
+needs nothing. W&B is an opt-in adapter behind the ``wandb`` extra.
 
 Run provenance
 --------------
 
-:meth:`Tracker.log_config` exists because a metric without the configuration
-that produced it is not a result. Implementations are expected to record the
-resolved config, the git commit, and whether the working tree was dirty --
-the last being the one people omit and the one that makes a number
-irreproducible.
+[Tracker.log_config][evogfn.tracking.base.Tracker.log_config] exists because a
+metric without the configuration that produced it is not a result.
+Implementations are expected to record the resolved config, the git commit, and
+whether the working tree was dirty -- the last being the one people omit and the
+one that makes a number irreproducible.
 """
 
 from __future__ import annotations

@@ -4,16 +4,18 @@ Trajectory balance compares whole trajectories against one global scalar. That
 gives an unbiased signal but a high-variance one: a single number has to carry
 credit for every action in a rollout, so a trajectory that ends badly penalises
 its good early steps equally. The objectives here instead constrain each
-*transition*, using a learned per-state flow :math:`F(s)`.
+*transition*, using a learned per-state flow $F(s)$.
 
 Detailed balance
 ----------------
 
-For every edge :math:`s \to s'`:
+For every edge $s \to s'$:
 
-.. math:: F(s) P_F(s'|s) = F(s') P_B(s|s')
+$$
+F(s) P_F(s'|s) = F(s') P_B(s|s')
+$$
 
-with :math:`F(x) = R(x)` at terminal states, which is what anchors the whole
+with $F(x) = R(x)$ at terminal states, which is what anchors the whole
 system to the reward. Credit is assigned locally, so the variance is lower --
 but the flow estimate has to be learned everywhere, and early in training it is
 wrong everywhere, which is the trade.
@@ -22,17 +24,17 @@ Sub-trajectory balance
 ----------------------
 
 Malkin et al. and Madan et al. (ICML 2023) interpolate: constrain every
-*sub-trajectory* :math:`s_i \to \dots \to s_j`, weighting by
-:math:`\lambda^{j-i}`. At :math:`\lambda \to 0` only single transitions count and
-this is detailed balance; as :math:`\lambda` grows, longer sub-trajectories
+*sub-trajectory* $s_i \to \dots \to s_j$, weighting by
+$\lambda^{j-i}$. At $\lambda \to 0$ only single transitions count and
+this is detailed balance; as $\lambda$ grows, longer sub-trajectories
 dominate and it approaches trajectory balance. One knob spans both, which is why
 it is the better experiment than running the two endpoints separately.
 
 Forward-looking detailed balance
 --------------------------------
 
-Pan et al. (2023) reparameterise :math:`\log F(s) = \log R(s) + \log \tilde F(s)`,
-so the network predicts a *correction* to a reward already known at :math:`s`
+Pan et al. (2023) reparameterise $\log F(s) = \log R(s) + \log \tilde F(s)$,
+so the network predicts a *correction* to a reward already known at $s$
 rather than the flow from nothing. The telescoping intermediate rewards cancel
 along a trajectory, so the objective is unchanged at optimum; what changes is
 that the network starts from a good guess instead of zero.
@@ -42,7 +44,7 @@ plainly.** The usual objection to forward-looking rewards is that a partial
 object has no reward -- half an autoregressively built sequence is not a
 sequence, and there is nothing to evaluate. In the mutation lattice every
 intermediate state *is* a complete, scorable sequence: it is the parent with
-some subset of the mutations applied. So :math:`R(s)` is available at every
+some subset of the mutations applied. So $R(s)$ is available at every
 state for free, and the reparameterisation is exact rather than heuristic. A
 method that is a workaround elsewhere is a natural fit here.
 """
@@ -152,7 +154,7 @@ class DetailedBalance(FlowObjective):
 
 
 class SubTrajectoryBalance(FlowObjective):
-    r"""Constrains every sub-trajectory, weighted by :math:`\lambda^{\text{length}}`.
+    r"""Constrains every sub-trajectory, weighted by $\lambda^{\text{length}}$.
 
     One knob spans detailed balance and trajectory balance, which makes the
     comparison between them a sweep rather than two implementations that might

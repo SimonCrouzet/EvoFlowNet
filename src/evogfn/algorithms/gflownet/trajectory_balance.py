@@ -1,6 +1,6 @@
 """Trajectory balance under the name the paper gives it.
 
-The objective now lives in :mod:`evogfn.algorithms.gflownet.objectives`
+The objective now lives in [evogfn.algorithms.gflownet.objectives][]
 alongside the alternatives, behind a shared interface. This module keeps
 ``trajectory_balance_loss`` because it is the form Malkin et al. state, and the
 form a reader checking the code against the paper will look for.

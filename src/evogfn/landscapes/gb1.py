@@ -28,10 +28,12 @@ The 6.6% that were never measured
 10,639 combinations are absent from the assay. Absent means *not observed in the
 library*, which is not the same as unfit -- a variant can be missing because it
 was never sampled. Treating those as zero is the common convention and is the
-default here, but it is an imputation, and :meth:`GB1Landscape.is_measured`
+default here, but it is an imputation, and
+[GB1Landscape.is_measured][evogfn.landscapes.gb1.GB1Landscape.is_measured]
 exists so that any analysis can exclude them instead.
 
-The same caveat applies to the optimum: :attr:`GB1Landscape.optimum` is the best
+The same caveat applies to the optimum:
+[GB1Landscape.optimum][evogfn.landscapes.gb1.GB1Landscape.optimum] is the best
 *measured* fitness. An unmeasured variant could in principle exceed it, so regret
 against it is exact only with respect to what was assayed.
 """

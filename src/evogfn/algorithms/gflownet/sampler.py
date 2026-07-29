@@ -8,11 +8,12 @@ algorithm it also knows about this.
 Where the oracle budget does *not* go
 -------------------------------------
 
-Training happens against a :class:`~evogfn.surrogate.proxy.ProxyLandscape`,
-never the oracle. A thousand gradient steps at batch 64 is 64,000 reward
-evaluations; charging those would exhaust a realistic campaign budget of a few
-hundred before the first round returned. Because the proxy holds no oracle, the
-separation is structural rather than a matter of remembering.
+Training happens against a
+[ProxyLandscape][evogfn.surrogate.proxy.ProxyLandscape], never the oracle. A
+thousand gradient steps at batch 64 is 64,000 reward evaluations; charging those
+would exhaust a realistic campaign budget of a few hundred before the first
+round returned. Because the proxy holds no oracle, the separation is structural
+rather than a matter of remembering.
 
 Retraining, not fine-tuning
 ---------------------------
@@ -67,11 +68,13 @@ class GFlowNetSampler(Sampler):
         objective: How balance violation is measured. Defaults to trajectory
             balance.
         genetic: A genetic algorithm to use as the policy's teacher. With one,
-            training runs through :func:`train_genetic_gfn` -- the GA
-            recombines the best of a rank-based buffer and its offspring are
-            replayed into the training batch. Kim et al. report this closing a
-            58% deficit against Mol GA on PMO, and directed evolution *is* a
-            genetic algorithm, so it is the variant most likely to matter here.
+            training runs through
+            [train_genetic_gfn][evogfn.algorithms.gflownet.genetic_gfn.train_genetic_gfn]
+            -- the GA recombines the best of a rank-based buffer and its
+            offspring are replayed into the training batch. Kim et al. report
+            this closing a 58% deficit against Mol GA on PMO, and directed
+            evolution *is* a genetic algorithm, so it is the variant most likely
+            to matter here.
         genetic_config: How much guidance to apply. Ignored without ``genetic``.
         seed: Seeds proposal sampling, independently of training.
     """

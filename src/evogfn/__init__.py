@@ -7,11 +7,11 @@ feasible set of candidates rather than many copies of one local optimum.
 
 The public surface is organised around a small number of replaceable seams:
 
-- :mod:`evogfn.landscapes` -- fitness functions (closed-form or empirical)
-- :mod:`evogfn.env`        -- the state graph variants are built through
-- :mod:`evogfn.algorithms` -- samplers: GFlowNets and classical baselines
-- :mod:`evogfn.metrics`    -- evaluation, including exact-distribution checks
-- :mod:`evogfn.loop`       -- design-build-test-learn campaigns under a budget
+- `evogfn.landscapes` -- fitness functions (closed-form or empirical)
+- `evogfn.env`        -- the state graph variants are built through
+- `evogfn.algorithms` -- samplers: GFlowNets and classical baselines
+- `evogfn.metrics`    -- evaluation, including exact-distribution checks
+- `evogfn.loop`       -- design-build-test-learn campaigns under a budget
 """
 
 from importlib.metadata import PackageNotFoundError, version

@@ -34,7 +34,7 @@ The budget it cannot have
 
 State this plainly, because the results table depends on it. The published
 protocol is **384 training variants plus a top-96 design plate, 480 assays**
-(:data:`PUBLISHED_BUDGET`). This repository's four-plate campaign budget is 384
+(`PUBLISHED_BUDGET`). This repository's four-plate campaign budget is 384
 assays *in total*. MLDE's training set alone therefore exceeds the entire budget
 it is benchmarked under, and there is no configuration in which the published
 method fits inside 384 calls.
@@ -43,11 +43,14 @@ So the default here trains on one 96-well plate, a quarter of Wittmann et al.'s
 sample. That is a **compression, not a design choice**, and it is a handicap:
 the method's own paper shows outcome improving with training set size, so a
 96-variant MLDE is a weaker MLDE. Any table reporting this arm must carry the
-note; :attr:`MLDE.budget_note` returns it in a form a report can print, and
-:attr:`MLDE.runs_below_published_training_size` is the boolean to branch on.
+note; [MLDE.budget_note][evogfn.algorithms.baselines.mlde.MLDE.budget_note]
+returns it in a form a report can print, and
+[MLDE.runs_below_published_training_size][evogfn.algorithms.baselines.mlde.MLDE.runs_below_published_training_size]
+is the boolean to branch on.
 
-Two ways out are provided and neither is silent. :meth:`MLDE.as_published`
-builds the method at its own split for a reference run at a 480-call budget, and
+Two ways out are provided and neither is silent.
+[MLDE.as_published][evogfn.algorithms.baselines.mlde.MLDE.as_published] builds
+the method at its own split for a reference run at a 480-call budget, and
 ``training_size=PUBLISHED_TRAINING_SIZE`` does the same by hand. Neither changes
 what an existing caller gets.
 
@@ -68,9 +71,9 @@ What is reproduced here, and is the paper's:
 
 * One-hot encoding of the variant, which is their ``onehot`` encoding and the
   one their unsupervised-encoding ablations are measured against.
-* 5-fold cross-validation of every member (:data:`PUBLISHED_CV_FOLDS`).
+* 5-fold cross-validation of every member (`PUBLISHED_CV_FOLDS`).
 * Ranking members by cross-validated mean squared error and averaging only the
-  top few (:data:`PUBLISHED_MODELS_AVERAGED`), rather than averaging blindly.
+  top few (`PUBLISHED_MODELS_AVERAGED`), rather than averaging blindly.
 * Averaging across the *fold instances* of the selected members, so the final
   predictor is 15 models each trained on 4/5 of the data -- exactly their
   ``n_averaged x n_cv`` construction, not a refit on everything.
@@ -310,13 +313,14 @@ class MLDE(Sampler):
         training_size: Measurements gathered at random before the model takes
             over. Defaults to one plate rather than Wittmann et al.'s 384,
             because 384 exceeds this repository's whole campaign budget; see the
-            module docstring, and pass :data:`PUBLISHED_TRAINING_SIZE` or use
-            :meth:`as_published` to run the method at its own split.
+            module docstring, and pass `PUBLISHED_TRAINING_SIZE` or use
+            [as_published][evogfn.algorithms.baselines.mlde.MLDE.as_published]
+            to run the method at its own split.
         pool_multiplier: Candidates generated per candidate returned. Our
             choice: the published method ranks an exhaustive library, and this
             is how much of an unenumerable one the ensemble gets to rank.
         ridge_alpha: Centre of the penalty sweep. Every regularised member is
-            fitted at this value scaled by :data:`_ALPHA_SCALES`, and
+            fitted at this value scaled by `_ALPHA_SCALES`, and
             cross-validation chooses between them, so this sets where the sweep
             sits rather than fixing one penalty. Meaningful as 1.0 only because
             every kernel here is normalised to ``[0, 1]``.
@@ -408,8 +412,8 @@ class MLDE(Sampler):
         """Build MLDE at Wittmann et al.'s own split, for a reference run.
 
         This configuration cannot complete inside this repository's 384-call
-        campaign budget: it screens :data:`PUBLISHED_TRAINING_SIZE` variants
-        before proposing anything, and needs :data:`PUBLISHED_BUDGET` calls to
+        campaign budget: it screens `PUBLISHED_TRAINING_SIZE` variants
+        before proposing anything, and needs `PUBLISHED_BUDGET` calls to
         reach a designed plate. It exists so that "MLDE as published" can be run
         as a separate reference arm at its own budget and quoted honestly beside
         the compressed arm, rather than the compressed arm being described as
@@ -421,7 +425,8 @@ class MLDE(Sampler):
             seed: Seeds the random training sample and the candidate pool.
 
         Returns:
-            An :class:`MLDE` whose training sample is the published one.
+            An [MLDE][evogfn.algorithms.baselines.mlde.MLDE] whose training
+            sample is the published one.
         """
         return cls(
             env,
@@ -476,7 +481,7 @@ class MLDE(Sampler):
         """Assays needed to complete one published-shaped protocol.
 
         Returns:
-            The training sample plus one :data:`PUBLISHED_BATCH_SIZE` design
+            The training sample plus one `PUBLISHED_BATCH_SIZE` design
             plate. Compare against the campaign budget: if it does not fit, the
             method is not being run as published.
         """
@@ -531,8 +536,9 @@ class MLDE(Sampler):
 
         Exposed because the ensemble's *predictions* are the thing worth
         checking against the single model it replaced, and a comparison that has
-        to reach through :meth:`propose` measures the candidate pool as much as
-        the regressor.
+        to reach through
+        [propose][evogfn.algorithms.baselines.mlde.MLDE.propose] measures the
+        candidate pool as much as the regressor.
 
         Args:
             sequences: An ``(n, sequence_length)`` array to score.
@@ -728,7 +734,7 @@ class MLDE(Sampler):
                 points; the fold's own columns are selected here.
 
         Returns:
-            An ``(m,)`` array, on the centred scale that :meth:`_predict`
+            An ``(m,)`` array, on the centred scale that `_predict`
             restores the offset to.
         """
         block = kernel[:, fit.rows]
@@ -807,7 +813,7 @@ class MLDE(Sampler):
             agreement: Normalised agreement, ``(m, n)`` or ``(n, n)``.
 
         Returns:
-            A mapping from :attr:`_Learner.kernel_key` to the matrix that member
+            A mapping from `_Learner.kernel_key` to the matrix that member
             reads. Built per call rather than cached because the training set
             changes every round; keyed so that the six polynomial members share
             two matrices and the four local members share two more.

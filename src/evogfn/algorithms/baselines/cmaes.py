@@ -211,9 +211,10 @@ class CMAES(Sampler):
     def observe(self, sequences: Tokens, values: Fitness) -> None:
         """Move the mean, the evolution paths, the covariance and the step size.
 
-        Only candidates traceable to the most recent :meth:`propose` contribute:
-        CMA-ES updates from the *Gaussian draws* behind the ranking, not from the
-        sequences, and a sequence from anywhere else has no draw behind it.
+        Only candidates traceable to the most recent
+        [propose][evogfn.algorithms.baselines.cmaes.CMAES.propose] contribute:
+        CMA-ES updates from the *Gaussian draws* behind the ranking, not from
+        the sequences, and a sequence from anywhere else has no draw behind it.
         A batch with fewer than two such candidates leaves the distribution
         untouched rather than updating it on a ranking of one.
 

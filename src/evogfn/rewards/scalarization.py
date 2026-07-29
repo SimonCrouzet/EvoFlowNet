@@ -9,9 +9,10 @@ Why the combination happens here, and not earlier
 -------------------------------------------------
 
 It would be simpler to have each landscape return an already-combined number.
-That is the choice this package deliberately does not make: :meth:`evaluate`
-returns ``(n, n_objectives)`` everywhere, including for single-objective
-landscapes, and the vector survives until this module.
+That is the choice this package deliberately does not make:
+[evaluate][evogfn.landscapes.base.FitnessLandscape.evaluate] returns ``(n,
+n_objectives)`` everywhere, including for single-objective landscapes, and the
+vector survives until this module.
 
 The reason is that a scalarised landscape has thrown the vector away, and three
 separate layers need it:
@@ -34,9 +35,10 @@ an array and keeps every option open.
 What this buys the training loop
 --------------------------------
 
-:class:`ScalarizedReward` is a :class:`~evogfn.rewards.base.Reward` like any
-other. The sampler, the objective and the training loop see ``log_reward`` and
-nothing else, so multi-objective training needs no change anywhere in them.
+[ScalarizedReward][evogfn.rewards.scalarization.ScalarizedReward] is a
+[Reward][evogfn.rewards.base.Reward] like any other. The sampler, the objective
+and the training loop see ``log_reward`` and nothing else, so multi-objective
+training needs no change anywhere in them.
 
 The three scalarisations
 ------------------------
@@ -44,13 +46,15 @@ The three scalarisations
 All three are the ones compared in Jain et al. (2023), Multi-Objective GFlowNets
 (ICML), Section 4:
 
-* :class:`WeightedSum` -- ``R(x|ω) = Σ_i ω_i R_i(x)``. Cannot reach points on a
-  non-convex part of the Pareto front, whatever ``ω`` is (Miettinen, 1999,
-  Thm 3.1.4); this is a property of the scalarisation, not of the sampler.
-* :class:`Tchebycheff` -- ``R(x|ω) = min_i ω_i |R_i(x) - z_i|``. Can reach every
-  Pareto-optimal point, including on non-convex fronts, which is the reason to
-  prefer it despite being non-smooth.
-* :class:`WeightedLogSum` -- ``R(x|ω) = Π_i R_i(x)^{ω_i}``. A weighted geometric
+* [WeightedSum][evogfn.rewards.scalarization.WeightedSum] -- ``R(x|ω) = Σ_i ω_i
+  R_i(x)``. Cannot reach points on a non-convex part of the Pareto front,
+  whatever ``ω`` is (Miettinen, 1999, Thm 3.1.4); this is a property of the
+  scalarisation, not of the sampler.
+* [Tchebycheff][evogfn.rewards.scalarization.Tchebycheff] -- ``R(x|ω) = min_i
+  ω_i |R_i(x) - z_i|``. Can reach every Pareto-optimal point, including on
+  non-convex fronts, which is the reason to prefer it despite being non-smooth.
+* [WeightedLogSum][evogfn.rewards.scalarization.WeightedLogSum] -- ``R(x|ω) =
+  Π_i R_i(x)^{ω_i}``. A weighted geometric
   mean: multiplicative rather than additive, so one objective at zero cannot be
   compensated by another being large.
 """
@@ -82,7 +86,8 @@ _MATRIX_NDIM = 2
 class Scalarization(ABC):
     """Combines an objective vector and a preference into one value per design.
 
-    Subclasses implement :meth:`_combine`. The public :meth:`scalarize` validates
+    Subclasses implement `_combine`. The public
+    [scalarize][evogfn.rewards.scalarization.Scalarization.scalarize] validates
     the objective matrix and the preference first, so no subclass repeats those
     checks and none can forget them.
     """
@@ -110,7 +115,8 @@ class Scalarization(ABC):
 
         Args:
             values: An ``(n, n_objectives)`` array of objective values, as
-                returned by :meth:`~evogfn.landscapes.base.FitnessLandscape.evaluate`.
+                returned by
+                [evaluate][evogfn.landscapes.base.FitnessLandscape.evaluate].
             preference: An ``(n_objectives,)`` preference vector applied to every
                 design, or an ``(n, n_objectives)`` array giving each design its
                 own -- which is what MOGFN-PC does, one preference per sampled
@@ -137,7 +143,8 @@ class WeightedSum(Scalarization):
     rather than numerical: sweeping ``ω`` over the whole simplex recovers only
     the convex hull of the Pareto front (Miettinen, 1999, Thm 3.1.4), so points
     in a concave dent are unreachable at every preference. If a front is expected
-    to be concave, use :class:`Tchebycheff` instead.
+    to be concave, use [Tchebycheff][evogfn.rewards.scalarization.Tchebycheff]
+    instead.
     """
 
     def _combine(
@@ -244,7 +251,8 @@ class WeightedLogSum(Scalarization):
     that is dead on any objective with non-zero weight scores at the floor no
     matter how good the rest are. That is usually the honest model of a protein
     -- an unfoldable variant with excellent predicted binding is not a partial
-    success -- and it is the substantive difference from :class:`WeightedSum`.
+    success -- and it is the substantive difference from
+    [WeightedSum][evogfn.rewards.scalarization.WeightedSum].
 
     Args:
         floor: Value substituted for non-positive or infeasible objectives before
@@ -286,24 +294,27 @@ class WeightedLogSum(Scalarization):
 class ScalarizedReward(Reward):
     """A multi-objective reward that behaves exactly like a single-objective one.
 
-    Composes a :class:`Scalarization` with an ordinary scalar reward, so the
-    sampler, the loss and the training loop see only ``log_reward`` and need no
-    knowledge that there was ever more than one objective.
+    Composes a [Scalarization][evogfn.rewards.scalarization.Scalarization] with
+    an ordinary scalar reward, so the sampler, the loss and the training loop
+    see only ``log_reward`` and need no knowledge that there was ever more than
+    one objective.
 
     The preference is held on the instance rather than passed to
-    :meth:`log_reward`, because :class:`~evogfn.rewards.base.Reward` takes
-    objective values and nothing else. For MOGFN-PC, where the preference is
-    resampled every batch, build a new reward per batch with
-    :meth:`with_preference` -- it is a cheap object, and keeping the preference
-    immutable means a reward and the log rewards it produced can never disagree.
+    [log_reward][evogfn.rewards.scalarization.ScalarizedReward.log_reward],
+    because [Reward][evogfn.rewards.base.Reward] takes objective values and
+    nothing else. For MOGFN-PC, where the preference is resampled every batch,
+    build a new reward per batch with
+    [with_preference][evogfn.rewards.scalarization.ScalarizedReward.with_preference]
+    -- it is a cheap object, and keeping the preference immutable means a reward
+    and the log rewards it produced can never disagree.
 
     Args:
         scalarization: How to combine the objectives.
         preference: The ``(n_objectives,)`` preference vector ``ω``. Must be
             non-negative and sum to one.
         reward: The scalar reward applied to the combined value. Defaults to
-            :class:`~evogfn.rewards.base.TemperedReward`, which supplies the
-            exponent ``β`` and the floor that keeps ``log R`` finite.
+            [TemperedReward][evogfn.rewards.base.TemperedReward], which supplies
+            the exponent ``β`` and the floor that keeps ``log R`` finite.
 
     Raises:
         ValueError: If the preference is not a one-dimensional, non-negative
@@ -337,7 +348,7 @@ class ScalarizedReward(Reward):
         """The scalar reward applied after scalarisation.
 
         Named ``scalar_reward`` rather than ``reward`` because
-        :meth:`~evogfn.rewards.base.Reward.reward` is already the method that
+        [reward][evogfn.rewards.base.Reward.reward] is already the method that
         computes ``R(x)``; a property of that name would shadow it and turn every
         call into an attribute access on a reward object.
         """
@@ -350,8 +361,9 @@ class ScalarizedReward(Reward):
             preference: The new ``(n_objectives,)`` preference vector.
 
         Returns:
-            A new :class:`ScalarizedReward` sharing this one's scalarisation and
-            scalar reward.
+            A new
+            [ScalarizedReward][evogfn.rewards.scalarization.ScalarizedReward]
+            sharing this one's scalarisation and scalar reward.
 
         Raises:
             ValueError: If the preference is not a one-dimensional, non-negative

@@ -398,7 +398,9 @@ class MutationEnvironment(SequenceEnvironment):
         Either way, normalising a target distribution over the ball puts mass on
         sequences of probability zero, and the L1 that results measures the
         mis-specified support rather than the policy -- loudly enough to read as a
-        broken sampler. Use :meth:`reachable_terminal_states` whenever a
+        broken sampler. Use
+        [reachable_terminal_states][evogfn.env.mutation.MutationEnvironment.reachable_terminal_states]
+        whenever a
         transition matrix is set or early stopping is forbidden; this method is
         the cheap closed-form answer for the unconstrained case, and an upper
         bound otherwise.
@@ -408,7 +410,7 @@ class MutationEnvironment(SequenceEnvironment):
 
         Raises:
             ValueError: If the ball exceeds
-            :data:`~evogfn.landscapes.base.MAX_ENUMERABLE_SIZE`.
+                `MAX_ENUMERABLE_SIZE`.
         """
         from itertools import combinations, product  # noqa: PLC0415 - only needed here
 
@@ -439,20 +441,20 @@ class MutationEnvironment(SequenceEnvironment):
 
         This is the support of the policy: the set an exact distributional
         comparison must be normalised over. It is found by walking the graph
-        forward from the parent using this environment's own :meth:`forward_mask`
-        and :meth:`step`, which makes it the reachable set by construction. A
+        forward from the parent using this environment's own `forward_mask`
+        and `step`, which makes it the reachable set by construction. A
         second implementation that re-derived reachability from ``transitions``
         could disagree with the masks, and then the measurement would be wrong in
         a way no test of the constraint alone would catch.
 
-        Filtering :meth:`enumerate_terminal_states` through :meth:`is_reachable`
+        Filtering `enumerate_terminal_states` through `is_reachable`
         is *not* equivalent, and that is the whole reason this method exists.
         Mutations are applied one at a time, so a variant carrying ``k`` of them
         is constructible only if some ordering exists along which all ``k``
         intermediates are feasible too. When every ordering passes through a
         forbidden adjacency, masking refuses that step in all of them and no path
         to the destination exists -- even though the destination itself is
-        perfectly feasible and satisfies :meth:`is_reachable`. On a length-8
+        perfectly feasible and satisfies `is_reachable`. On a length-8
         Ehrlich toy with a transition matrix and a budget of two mutations, the
         Hamming ball holds 277 sequences, 26 of them feasible, and 18 reachable:
         eight feasible designs the policy can never emit.
@@ -468,10 +470,10 @@ class MutationEnvironment(SequenceEnvironment):
 
         Raises:
             ValueError: If the Hamming ball exceeds
-            :data:`~evogfn.landscapes.base.MAX_ENUMERABLE_SIZE`. The search visits
-            a subset of the ball, so refusing up front on that bound means the
-            walk itself can never exhaust memory, at the cost of refusing some
-            heavily constrained graphs that would in fact have been small.
+                `MAX_ENUMERABLE_SIZE`. The search visits a subset of the ball,
+                so refusing up front on that bound means the walk itself can
+                never exhaust memory, at the cost of refusing some heavily
+                constrained graphs that would in fact have been small.
         """
         from evogfn.landscapes.base import MAX_ENUMERABLE_SIZE  # noqa: PLC0415
 

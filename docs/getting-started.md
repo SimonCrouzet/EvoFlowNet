@@ -113,9 +113,7 @@ sampler = GFlowNetSampler(
     ),
     # The proxy wraps the *same* surrogate instance the campaign refits, so the
     # sampler sees each round's model without the loop knowing it cares.
-    proxy=ProxyLandscape(
-        surrogate, alphabet=env.alphabet, sequence_length=env.sequence_length
-    ),
+    proxy=ProxyLandscape(surrogate, alphabet=env.alphabet, sequence_length=env.sequence_length),
     reward=TemperedReward(beta=3.0),
     config=TrainingConfig(steps=300, batch_size=64, seed=0),
     seed=0,

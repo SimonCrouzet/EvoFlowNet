@@ -91,10 +91,10 @@ class Campaign:
             ``None`` runs the sampler unassisted -- the ablation that says how
             much of the result is the surrogate rather than the sampler.
         acquisition: Turns predictions and uncertainty into one score. Defaults
-            to :class:`~evogfn.acquisition.rules.Greedy`, the baseline the
+            to [Greedy][evogfn.acquisition.rules.Greedy], the baseline the
             published nulls favour.
         selector: Picks the batch to measure. Defaults to
-            :class:`~evogfn.acquisition.rules.TopK`.
+            [TopK][evogfn.acquisition.rules.TopK].
         rounds: How many design-build-test-learn cycles.
         batch_size: Variants measured per round.
         pool_size: Candidates generated per round before selection.

@@ -12,8 +12,9 @@ computable on an empirical protein fitness landscape as well.
 
 The comparison is only meaningful with enough samples. An empirical distribution
 over 100 draws differs from any target simply by sampling noise, so
-:func:`expected_l1_from_sampling_noise` is provided to say what "close" should
-mean for a given sample count before reading anything into the number.
+[expected_l1_from_sampling_noise][evogfn.metrics.distribution.expected_l1_from_sampling_noise]
+is provided to say what "close" should mean for a given sample count before
+reading anything into the number.
 """
 
 from __future__ import annotations

@@ -30,7 +30,8 @@ was stale if any package it named had changed anywhere, so adding an unrelated
 new file -- ``metrics/pareto.py``, say -- invalidated every genetic-algorithm
 result in the store, none of which can reach it. Once that cost ~3,900 needless
 campaigns, and it was avoided only by reasoning by hand about which code paths
-were byte-identical and then calling :meth:`ResultStore.bless`. Hand-reasoning
+were byte-identical and then calling
+[ResultStore.bless][evogfn.benchmark.store.ResultStore.bless]. Hand-reasoning
 about staleness is precisely what must not be load-bearing: it is unreviewable,
 and it fails silently in the direction of trusting a stale number.
 
@@ -41,7 +42,7 @@ properly: a report no campaign imports is simply never in one, while a task
 definition that a campaign does reach is, which is right, since it decides what
 was run.
 
-The walk is static, over :mod:`ast`, and deliberately does not import anything:
+The walk is static, over `ast`, and deliberately does not import anything:
 importing has side effects, costs seconds per module here, and would need the
 whole dependency tree installed just to decide whether a cache entry is valid.
 
@@ -73,9 +74,10 @@ failure this replaced. The judgement is that these files re-export and nothing
 else; one that registered a handler or patched a default at import time would
 break it, and that is the shape of edit to be careful with.
 
-Against those, :meth:`ResultStore.stamp` is happy to over-include: an entry
-point list that is too broad wastes compute, one that is too narrow yields a
-table that silently mixes code versions. When in doubt, declare more.
+Against those, [ResultStore.stamp][evogfn.benchmark.store.ResultStore.stamp] is
+happy to over-include: an entry point list that is too broad wastes compute, one
+that is too narrow yields a table that silently mixes code versions. When in
+doubt, declare more.
 
 Imports under ``if TYPE_CHECKING:`` are included for the same reason. They are
 not read at runtime today, but promoting one to a runtime import is a one-line
@@ -162,7 +164,7 @@ def fingerprint(root: Path | None = None) -> dict[str, str]:
 
 
 def package_fingerprint(root: Path | None = None) -> dict[str, str]:
-    """Hash each of the :data:`FINGERPRINTED` packages as a whole.
+    """Hash each of the `FINGERPRINTED` packages as a whole.
 
     This is the superseded scheme. It exists so that records written under it
     can still be judged stale or current, rather than crashing a load or --
@@ -333,7 +335,8 @@ class RunRecord:
             ten are what anyone actually looks at.
         source: Fingerprint of the code this run could reach, keyed by dotted
             module name. Records written before per-module hashing are keyed by
-            bare package name instead; see :meth:`stale_against`.
+            bare package name instead; see
+            [stale_against][evogfn.benchmark.store.RunRecord.stale_against].
     """
 
     task: str
@@ -357,7 +360,7 @@ class RunRecord:
     def per_package(self) -> bool:
         """Whether this was stamped by the superseded per-package scheme.
 
-        Its keys are the bare package names in :data:`FINGERPRINTED`, so one of
+        Its keys are the bare package names in `FINGERPRINTED`, so one of
         those settles it. "Dotless" would not: the root package is a module
         like any other and hashes under its own bare name.
         """
@@ -599,7 +602,8 @@ class ResultStore:
         editing one the run could not reach, no longer invalidates anything, so
         the cases left are genuine edits to a depended-on module that genuinely
         cannot change its output. Reaching for this often is a sign that the
-        entry points passed to :meth:`stamp` are wider than the run.
+        entry points passed to [stamp][evogfn.benchmark.store.ResultStore.stamp]
+        are wider than the run.
 
         Use it only when that argument actually holds. It is the one operation
         here that can make a table mix results from different code, which is the

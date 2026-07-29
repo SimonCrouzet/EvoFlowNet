@@ -2,25 +2,30 @@ r"""Training objectives, behind one interface so they can be swapped.
 
 Every objective here enforces the same thing -- that the forward policy samples
 terminal states in proportion to their reward -- and differs only in how it
-measures the violation. Keeping them behind :class:`GFlowNetObjective` means
-choosing between them is a configuration change, and means a training strategy
-(replay, genetic guidance, local search) composes with any of them rather than
-being written against one.
+measures the violation. Keeping them behind
+[GFlowNetObjective][evogfn.algorithms.gflownet.objectives.GFlowNetObjective]
+means choosing between them is a configuration change, and means a training
+strategy (replay, genetic guidance, local search) composes with any of them
+rather than being written against one.
 
 Trajectory balance versus contrastive balance
 ---------------------------------------------
 
-:class:`TrajectoryBalance` measures each trajectory against a learned scalar
-``log Z``:
+[TrajectoryBalance][evogfn.algorithms.gflownet.objectives.TrajectoryBalance]
+measures each trajectory against a learned scalar ``log Z``:
 
-.. math:: \left(\log Z + \log P_F(\tau) - \log R(x) - \log P_B(\tau|x)\right)^2
+$$
+\left(\log Z + \log P_F(\tau) - \log R(x) - \log P_B(\tau|x)\right)^2
+$$
 
-:class:`ContrastiveBalance` measures *pairs* of trajectories against each other.
-Writing :math:`v(\tau) = \log P_F(\tau) - \log R(x) - \log P_B(\tau|x)`, the
-condition is that ``v`` is the same constant (namely :math:`-\log Z`) for every
-trajectory, so any two must agree:
+[ContrastiveBalance][evogfn.algorithms.gflownet.objectives.ContrastiveBalance]
+measures *pairs* of trajectories against each other. Writing $v(\tau) = \log
+P_F(\tau) - \log R(x) - \log P_B(\tau|x)$, the condition is that ``v`` is the
+same constant (namely $-\log Z$) for every trajectory, so any two must agree:
 
-.. math:: \left(v(\tau_1) - v(\tau_2)\right)^2
+$$
+\left(v(\tau_1) - v(\tau_2)\right)^2
+$$
 
 ``Z`` cancels. This is Deleu et al.'s contrastive balance condition (UAI 2024)
 and is the VarGrad estimator noted by Malkin et al.; what is recent is the
@@ -28,7 +33,7 @@ empirical case for preferring it, from Stable-GFN (ICML 2026) and GFlowRL, both
 reporting the learned ``log Z`` to be the dominant source of instability.
 
 The reason to care here specifically: trajectory length varies from 1 to
-``max_mutations + 1``, and the backward term contributes :math:`-\log k!`, which
+``max_mutations + 1``, and the backward term contributes $-\log k!$, which
 spans tens of nats across that range. A single global scalar fitted by gradient
 descent against that spread is the pathology those papers describe. Whether it
 actually bites at our scale is an empirical question -- which is the point of

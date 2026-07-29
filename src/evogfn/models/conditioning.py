@@ -31,7 +31,7 @@ This module is deliberately standalone
 
 The encoding is array arithmetic with no parameters, so it is testable on its
 own and independent of any particular policy architecture.
-:class:`~evogfn.models.policy.SequencePolicy` is left untouched: a
+[SequencePolicy][evogfn.models.policy.SequencePolicy] is left untouched: a
 preference-conditioned policy concatenates ``preference_encoding(...)`` to its
 trunk input, and everything that is *hard* about doing so -- widening the trunk,
 resampling ``ω`` per batch -- belongs to that policy, not here.
@@ -120,14 +120,15 @@ def preference_encoding(preference: npt.ArrayLike, *, n_bins: int = 16) -> npt.N
     lives in, and flattens the result so it can be concatenated to a state
     representation. The layout is objective-major: the first ``n_bins`` entries
     encode ``ω_0``, the next ``n_bins`` encode ``ω_1``, and so on. Use
-    :func:`encoding_dim` to size the network input rather than recomputing it at
-    the call site, so the two cannot drift apart.
+    [encoding_dim][evogfn.models.conditioning.encoding_dim] to size the network
+    input rather than recomputing it at the call site, so the two cannot drift
+    apart.
 
     Args:
         preference: An ``(n_objectives,)`` preference vector, or an
             ``(n, n_objectives)`` batch of them. Must be non-negative and sum to
             one along the last axis.
-        n_bins: Bins per objective. Must be at least :data:`MIN_BINS`.
+        n_bins: Bins per objective. Must be at least `MIN_BINS`.
 
     Returns:
         An ``(n_objectives * n_bins,)`` array for a single preference, or an
@@ -135,7 +136,7 @@ def preference_encoding(preference: npt.ArrayLike, *, n_bins: int = 16) -> npt.N
 
     Raises:
         ValueError: If the preference is not a vector or batch of vectors on the
-            simplex, or if ``n_bins`` is below :data:`MIN_BINS`.
+            simplex, or if ``n_bins`` is below `MIN_BINS`.
     """
     weights = np.asarray(preference, dtype=np.float64)
     if weights.ndim not in (1, _MATRIX_NDIM):
@@ -196,7 +197,7 @@ def thermometer_encode(
     Args:
         values: An array of any shape; encoding is applied elementwise and adds a
             trailing axis of length ``n_bins``.
-        n_bins: Number of bins. Must be at least :data:`MIN_BINS`.
+        n_bins: Number of bins. Must be at least `MIN_BINS`.
         vmin: Value encoded as all zeros.
         vmax: Value encoded as all ones. Must exceed ``vmin``.
 
@@ -204,7 +205,7 @@ def thermometer_encode(
         An array shaped ``(*values.shape, n_bins)`` with entries in ``[0, 1]``.
 
     Raises:
-        ValueError: If ``n_bins`` is below :data:`MIN_BINS`, if ``vmax`` does not
+        ValueError: If ``n_bins`` is below `MIN_BINS`, if ``vmax`` does not
             exceed ``vmin``, or if any value is not finite.
     """
     if n_bins < MIN_BINS:
@@ -226,7 +227,7 @@ def thermometer_encode(
 
 
 def encoding_dim(n_objectives: int, *, n_bins: int = 16) -> int:
-    """Width of the conditioning vector :func:`preference_encoding` produces.
+    """Width of the conditioning vector `preference_encoding` produces.
 
     Args:
         n_objectives: Number of objectives being traded off.
@@ -237,7 +238,7 @@ def encoding_dim(n_objectives: int, *, n_bins: int = 16) -> int:
 
     Raises:
         ValueError: If ``n_objectives`` is not positive or ``n_bins`` is below
-            :data:`MIN_BINS`.
+            `MIN_BINS`.
     """
     if n_objectives < 1:
         raise ValueError(f"n_objectives must be at least 1, got {n_objectives}")

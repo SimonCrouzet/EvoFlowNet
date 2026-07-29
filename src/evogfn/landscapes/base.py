@@ -7,13 +7,15 @@ expensive step that the whole method exists to economise on.
 Two properties are deliberately part of the interface even though most real
 landscapes cannot provide them:
 
-* :attr:`FitnessLandscape.optimum` -- the best attainable objective values, when
-  known by construction or by exhaustive measurement. It makes *regret* exact
-  rather than relative to the best sequence seen so far.
-* :meth:`FitnessLandscape.enumerate` -- every sequence in the space, when the
-  space is small enough. It makes the target distribution ``p*(x)`` computable
-  in closed form, which is the only way to check that a sampler is sampling
-  rather than hill-climbing.
+* [FitnessLandscape.optimum][evogfn.landscapes.base.FitnessLandscape.optimum] --
+  the best attainable objective values, when known by construction or by
+  exhaustive measurement. It makes *regret* exact rather than relative to the
+  best sequence seen so far.
+*
+  [FitnessLandscape.enumerate][evogfn.landscapes.base.FitnessLandscape.enumerate]
+  -- every sequence in the space, when the space is small enough. It makes the
+  target distribution ``p*(x)`` computable in closed form, which is the only way
+  to check that a sampler is sampling rather than hill-climbing.
 
 Landscapes that cannot answer these return ``None`` and raise respectively; the
 benchmarks in this package were chosen precisely because they can.
@@ -40,9 +42,10 @@ MAX_ENUMERABLE_SIZE = 5_000_000
 class FitnessLandscape(ABC):
     """Maps sequences to objective values.
 
-    Subclasses implement :meth:`_evaluate`. The public :meth:`evaluate` validates
-    its input first, so no subclass has to repeat those checks and none can
-    forget them.
+    Subclasses implement `_evaluate`. The public
+    [evaluate][evogfn.landscapes.base.FitnessLandscape.evaluate] validates its
+    input first, so no subclass has to repeat those checks and none can forget
+    them.
     """
 
     @property
@@ -151,7 +154,7 @@ class FitnessLandscape(ABC):
             in odometer order with the last position varying fastest.
 
         Raises:
-            ValueError: If the space is larger than :data:`MAX_ENUMERABLE_SIZE`.
+            ValueError: If the space is larger than `MAX_ENUMERABLE_SIZE`.
         """
         size = self.search_space_size
         if size > MAX_ENUMERABLE_SIZE:
