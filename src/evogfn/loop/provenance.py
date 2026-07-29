@@ -16,7 +16,7 @@ measurement attributable to a round rather than to the campaign as a whole.
 Why files rather than tracker calls alone
 ------------------------------------------
 
-:meth:`~evogfn.tracking.base.Tracker.log_artifact` takes a path, so
+[log_artifact][evogfn.tracking.base.Tracker.log_artifact] takes a path, so
 something has to write the file. Doing it here rather than inside the tracker
 keeps the format one thing instead of one per backend, and means a run with
 ``tracker=noop`` still leaves a readable trail on disk -- which is the case that

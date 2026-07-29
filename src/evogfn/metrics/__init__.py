@@ -1,11 +1,11 @@
 """Evaluation metrics.
 
-Split by what they answer. :mod:`~evogfn.metrics.performance` asks how good
-the designs are, :mod:`~evogfn.metrics.diversity` asks how varied,
-:mod:`~evogfn.metrics.pareto` asks how good the *set* of trade-offs is when
+Split by what they answer. [performance][evogfn.metrics.performance] asks how
+good the designs are, [diversity][evogfn.metrics.diversity] asks how varied,
+[pareto][evogfn.metrics.pareto] asks how good the *set* of trade-offs is when
 there is more than one objective, and
-:mod:`~evogfn.metrics.distribution` asks whether the sampler is sampling at
-all -- the last being the only one a hill-climber cannot pass.
+[distribution][evogfn.metrics.distribution] asks whether the sampler is sampling
+at all -- the last being the only one a hill-climber cannot pass.
 """
 
 from evogfn.metrics.distribution import (

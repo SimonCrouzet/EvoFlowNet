@@ -60,7 +60,8 @@ class Reward(ABC):
         """Compute ``R(x)`` directly.
 
         Provided for metrics and inspection. Training should use
-        :meth:`log_reward`, which is what the loss is expressed in.
+        [log_reward][evogfn.rewards.base.Reward.log_reward], which is what the
+        loss is expressed in.
 
         Args:
             values: An ``(n, n_objectives)`` array of objective values.

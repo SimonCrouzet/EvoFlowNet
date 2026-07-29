@@ -8,8 +8,10 @@ driven by the same loop and charged for the same thing.
 
 Two calls, matching what a design round actually does:
 
-* :meth:`Sampler.propose` -- hand me candidates to evaluate.
-* :meth:`Sampler.observe` -- here is what they scored.
+* [Sampler.propose][evogfn.algorithms.base.Sampler.propose] -- hand me
+candidates to evaluate.
+* [Sampler.observe][evogfn.algorithms.base.Sampler.observe] -- here is what they
+scored.
 
 A genetic algorithm keeps a population between the two; a GFlowNet updates a
 policy; random mutagenesis ignores ``observe`` entirely. None of that is visible
@@ -18,12 +20,12 @@ to the harness, which is the point.
 Proposals are not the same as oracle calls
 ------------------------------------------
 
-:attr:`Sampler.proposals_made` counts candidates *generated*, which can far
-exceed the number *evaluated* when a sampler rejects its own output -- a
-rejection-sampling GA under a feasibility constraint being the case this
-distinction exists for. Reporting only oracle calls would make such a sampler
-look free; reporting only proposals would make an expensive oracle look cheap.
-Both are recorded so the trade can be seen.
+[Sampler.proposals_made][evogfn.algorithms.base.Sampler.proposals_made] counts
+candidates *generated*, which can far exceed the number *evaluated* when a
+sampler rejects its own output -- a rejection-sampling GA under a feasibility
+constraint being the case this distinction exists for. Reporting only oracle
+calls would make such a sampler look free; reporting only proposals would make
+an expensive oracle look cheap. Both are recorded so the trade can be seen.
 """
 
 from __future__ import annotations

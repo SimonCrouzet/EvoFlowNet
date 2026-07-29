@@ -21,10 +21,10 @@ form it implements and the reference it came from.
 Refusing rather than approximating
 ----------------------------------
 
-:func:`hypervolume` is exact in every dimension it accepts and raises past the
-point where its exact method becomes intractable. An approximate hypervolume
-reported next to an exact one is worse than no number at all, because nothing in
-the output says which one it is.
+[hypervolume][evogfn.metrics.pareto.hypervolume] is exact in every dimension it
+accepts and raises past the point where its exact method becomes intractable. An
+approximate hypervolume reported next to an exact one is worse than no number at
+all, because nothing in the output says which one it is.
 """
 
 from __future__ import annotations
@@ -119,7 +119,7 @@ def hypervolume(values: Fitness, reference: npt.ArrayLike) -> float:
 
     * one or two objectives -- a sweep, exact, any number of points;
     * three or more -- inclusion--exclusion over the front, exact, but limited to
-      :data:`MAX_INCLUSION_EXCLUSION_POINTS` non-dominated points.
+      `MAX_INCLUSION_EXCLUSION_POINTS` non-dominated points.
 
     Args:
         values: An ``(n, n_objectives)`` array of objective values.
@@ -134,7 +134,7 @@ def hypervolume(values: Fitness, reference: npt.ArrayLike) -> float:
             contains ``nan``, or if the reference is not a finite point of
             matching width.
         NotImplementedError: If three or more objectives are combined with more
-            than :data:`MAX_INCLUSION_EXCLUSION_POINTS` non-dominated points,
+            than `MAX_INCLUSION_EXCLUSION_POINTS` non-dominated points,
             where the exact method here becomes intractable. The alternative
             would be an approximation reported as if it were exact.
     """
@@ -268,14 +268,16 @@ def igd_plus(values: Fitness, reference_front: Fitness) -> float:
 def gd_plus(values: Fitness, reference_front: Fitness) -> float:
     """How far the designs found are from a reference front.
 
-    The companion of :func:`igd_plus` from the same paper (Ishibuchi et al.,
+    The companion of [igd_plus][evogfn.metrics.pareto.igd_plus] from the same
+    paper (Ishibuchi et al.,
     2015), averaging over the designs instead of over the reference points::
 
         GD+(A, Z) = (1/|A|) Σ_{a∈A} min_{z∈Z} d+(a, z)
 
     It measures convergence only. A set of one excellent design scores perfectly
-    here while covering none of the front, which is exactly what :func:`igd_plus`
-    catches and this does not -- report the pair, not either alone.
+    here while covering none of the front, which is exactly what
+    [igd_plus][evogfn.metrics.pareto.igd_plus] catches and this does not --
+    report the pair, not either alone.
 
     **Lower is better**.
 
@@ -325,7 +327,7 @@ def _hypervolume_inclusion_exclusion(
 
     Raises:
         NotImplementedError: If the front is larger than
-            :data:`MAX_INCLUSION_EXCLUSION_POINTS`.
+            `MAX_INCLUSION_EXCLUSION_POINTS`.
     """
     k = front.shape[0]
     if k > MAX_INCLUSION_EXCLUSION_POINTS:

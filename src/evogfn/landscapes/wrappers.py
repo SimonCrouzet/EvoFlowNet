@@ -8,8 +8,9 @@ landscape needing to know about them, and they compose:
     >>> assay = Budgeted(Noisy(EhrlichLandscape(seed=0), scale=0.05, seed=1), max_evaluations=500)
 
 **Order matters.** A call enters the outermost wrapper first, so whichever of
-:class:`Budgeted` and :class:`Cached` is on the outside decides what the budget
-actually counts:
+[Budgeted][evogfn.landscapes.wrappers.Budgeted] and
+[Cached][evogfn.landscapes.wrappers.Cached] is on the outside decides what the
+budget actually counts:
 
 * ``Cached(Budgeted(landscape))`` -- the cache answers first, so the budget only
   ever sees sequences it has not scored before. **The budget counts distinct
@@ -27,15 +28,17 @@ sequences at different rates, put the budget outside.
 Neither is a default, because choosing silently would change what a reported
 budget means.
 
-**Two noise models, and they are not interchangeable.** :class:`Noisy` adds
-homoscedastic Gaussian noise: the same uncertainty everywhere, so a sampler that
-climbs to the top of the landscape finds the measurements there exactly as
-trustworthy as the ones at the bottom. Real selection assays do not behave that
-way, and :class:`SelectionNoisy` is the wrapper that reproduces what they
-actually do -- see its docstring for the finding it exists to model. Use
-:class:`Noisy` when you want a controlled, analytically simple perturbation; use
-:class:`SelectionNoisy` when the claim being made is about robustness to *assay*
-noise.
+**Two noise models, and they are not interchangeable.**
+[Noisy][evogfn.landscapes.wrappers.Noisy] adds homoscedastic Gaussian noise: the
+same uncertainty everywhere, so a sampler that climbs to the top of the
+landscape finds the measurements there exactly as trustworthy as the ones at the
+bottom. Real selection assays do not behave that way, and
+[SelectionNoisy][evogfn.landscapes.wrappers.SelectionNoisy] is the wrapper that
+reproduces what they actually do -- see its docstring for the finding it exists
+to model. Use [Noisy][evogfn.landscapes.wrappers.Noisy] when you want a
+controlled, analytically simple perturbation; use
+[SelectionNoisy][evogfn.landscapes.wrappers.SelectionNoisy] when the claim being
+made is about robustness to *assay* noise.
 """
 
 from __future__ import annotations
@@ -148,8 +151,9 @@ class Noisy(LandscapeWrapper):
     measurement as truth should degrade here, and one that averages or models
     uncertainty should not.
 
-    The true values remain reachable through :attr:`inner`, so metrics can be
-    computed against ground truth while the search only ever sees noise.
+    The true values remain reachable through
+    [inner][evogfn.landscapes.wrappers.LandscapeWrapper.inner], so metrics can
+    be computed against ground truth while the search only ever sees noise.
 
     Args:
         landscape: The landscape to wrap.
@@ -209,9 +213,9 @@ class SelectionNoisy(LandscapeWrapper):
     correlation between measured and true fitness"* -- Pearson r ≈ 0 for the
     ~1,000 highest-enrichment variants. **The top of the measured landscape,
     precisely where a sampler concentrates, is where the measurement carries the
-    least information.** :class:`Noisy` cannot produce this at any ``scale``: its
-    error is the same size everywhere, so the correlation it leaves behind is
-    flat across the fitness range.
+    least information.** [Noisy][evogfn.landscapes.wrappers.Noisy] cannot
+    produce this at any ``scale``: its error is the same size everywhere, so the
+    correlation it leaves behind is flat across the fitness range.
 
     **Why the real assay does it.** The pathology is not additive noise. A
     pooled selection measures fitness only through a survival probability, and
@@ -221,13 +225,15 @@ class SelectionNoisy(LandscapeWrapper):
     amplifies that noise without bound. So the model here is the mechanism, not
     a variance function bolted onto a Gaussian:
 
-    .. math::
-
-        p_i          &= \sigma(s \cdot (f_i - m)) \\
-        \lambda_i    &\sim \mathrm{Gamma}(k,\ \bar{n}/k) \\
-        n^{0}_i      &\sim \mathrm{Poisson}(\lambda_i) \\
-        n^{1}_i      &\sim \mathrm{Binomial}(n^{0}_i,\ p_i) \\
-        \hat{f}_i    &= m + \sigma^{-1}\!\left(\tfrac{n^{1}_i + 1/2}{n^{0}_i + 1}\right) / s
+    $$
+    \begin{aligned}
+    p_i          &= \sigma(s \cdot (f_i - m)) \\
+    \lambda_i    &\sim \mathrm{Gamma}(k,\ \bar{n}/k) \\
+    n^{0}_i      &\sim \mathrm{Poisson}(\lambda_i) \\
+    n^{1}_i      &\sim \mathrm{Binomial}(n^{0}_i,\ p_i) \\
+    \hat{f}_i    &= m + \sigma^{-1}\!\left(\tfrac{n^{1}_i + 1/2}{n^{0}_i + 1}\right) / s
+    \end{aligned}
+    $$
 
     The Gamma-Poisson draw is a negative binomial: library preparation does not
     deposit every variant at equal abundance, and ``dispersion`` is the
@@ -243,16 +249,18 @@ class SelectionNoisy(LandscapeWrapper):
     the assay.
 
     Note:
-        Unlike :class:`Noisy`, this wrapper is not centred on the truth: the
-        inverse link is convex at the top of the range, so measurements of the
-        best variants are biased upward. That bias is a property of real
-        enrichment assays and is deliberately not corrected.
+        Unlike [Noisy][evogfn.landscapes.wrappers.Noisy], this wrapper is not
+        centred on the truth: the inverse link is convex at the top of the
+        range, so measurements of the best variants are biased upward. That bias
+        is a property of real enrichment assays and is deliberately not
+        corrected.
 
     Note:
-        :class:`Cached` rejects this class for the same reason it rejects
-        :class:`Noisy`: caching freezes the first measurement of each sequence
-        forever, and here that would remove precisely the fitness-dependent
-        error the wrapper exists to produce.
+        [Cached][evogfn.landscapes.wrappers.Cached] rejects this class for the
+        same reason it rejects [Noisy][evogfn.landscapes.wrappers.Noisy]:
+        caching freezes the first measurement of each sequence forever, and here
+        that would remove precisely the fitness-dependent error the wrapper
+        exists to produce.
 
     Args:
         landscape: The landscape to wrap.
@@ -523,11 +531,13 @@ class Cached(LandscapeWrapper):
     class: see the module docstring.
 
     Note:
-        Caching a stochastic landscape -- :class:`Noisy`, :class:`SelectionNoisy`
-        or anything else that draws -- freezes the first measurement of each
-        sequence and returns it forever, which removes exactly the repeated
-        sampling that makes noise interesting. That combination is almost
-        certainly a mistake, so the constructor rejects it.
+        Caching a stochastic landscape --
+        [Noisy][evogfn.landscapes.wrappers.Noisy],
+        [SelectionNoisy][evogfn.landscapes.wrappers.SelectionNoisy] or anything
+        else that draws -- freezes the first measurement of each sequence and
+        returns it forever, which removes exactly the repeated sampling that
+        makes noise interesting. That combination is almost certainly a mistake,
+        so the constructor rejects it.
 
     Args:
         landscape: The landscape to wrap.

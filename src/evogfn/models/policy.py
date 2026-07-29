@@ -6,9 +6,9 @@ than the architecture does.
 
 **Masking is applied inside the model, not by the caller.** A caller who forgets
 to mask gets a policy placing probability on edges that do not exist, and the
-symptom is not a crash but a slightly wrong distribution. :meth:`log_probs`
-therefore takes the mask and there is no way to obtain unmasked log
-probabilities by accident.
+symptom is not a crash but a slightly wrong distribution.
+[log_probs][evogfn.models.policy.SequencePolicy.log_probs] therefore takes the
+mask and there is no way to obtain unmasked log probabilities by accident.
 
 **The heads share a trunk except for their final layer**, following Malkin et
 al. The two policies describe the same graph from opposite directions, so most

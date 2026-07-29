@@ -14,11 +14,11 @@ method, which is the only thing a comparison should be measuring.
 The GFlowNet variants train against a proxy, never the oracle
 --------------------------------------------------------------
 
-Each builds a :class:`~evogfn.surrogate.proxy.ProxyLandscape` over the same
-surrogate instance the campaign refits, so training costs proxy evaluations and
-never oracle calls. The classical baselines are offered both blind and with the
-same proxy access, because comparing a method that optimises the model against
-one that only meets it as a filter is not a comparison of methods.
+Each builds a [ProxyLandscape][evogfn.surrogate.proxy.ProxyLandscape] over the
+same surrogate instance the campaign refits, so training costs proxy evaluations
+and never oracle calls. The classical baselines are offered both blind and with
+the same proxy access, because comparing a method that optimises the model
+against one that only meets it as a filter is not a comparison of methods.
 """
 
 from __future__ import annotations
@@ -319,7 +319,7 @@ OBJECTIVES: dict[str, Methodology] = {
 def flow_objectives() -> dict[str, Methodology]:
     """The detailed-balance family, which needs a policy with a flow head.
 
-    Separate from :data:`OBJECTIVES` because they require ``learn_flow`` and
+    Separate from `OBJECTIVES` because they require ``learn_flow`` and
     would raise rather than silently degrade if handed a policy without one.
 
     Returns:

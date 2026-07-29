@@ -49,7 +49,7 @@ class ProxyOptimising(Sampler):
     Args:
         sampler: The search method to wrap. Driven through its ordinary
             ``propose``/``observe`` interface, so anything implementing
-            :class:`~evogfn.algorithms.base.Sampler` works unmodified.
+            [Sampler][evogfn.algorithms.base.Sampler] works unmodified.
         proxy: The surrogate-backed landscape to search against.
         generations: Inner iterations per round.
         population: Candidates evaluated per inner generation.

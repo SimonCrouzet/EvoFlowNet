@@ -14,9 +14,9 @@ against the configuration its authors chose rather than one convenient to us.
 Rejection sampling and the feasibility claim
 --------------------------------------------
 
-:class:`GeneticAlgorithm` accepts ``feasible_only``, which resamples offspring
-until they satisfy the environment's constraint. This exists to make the
-feasibility claim falsifiable.
+[GeneticAlgorithm][evogfn.algorithms.baselines.genetic.GeneticAlgorithm] accepts
+``feasible_only``, which resamples offspring until they satisfy the
+environment's constraint. This exists to make the feasibility claim falsifiable.
 
 A masked policy is feasible by construction; the interesting question is whether
 that is an *advantage*, and rejection sampling is the control that decides it. A
@@ -26,8 +26,8 @@ equal oracle budget it may well match a masked policy. What it burns instead is
 
 So the honest framing is: if rejection keeps up, the masking advantage is one of
 proposal cost rather than sample efficiency, and should be reported that way.
-:attr:`~evogfn.algorithms.base.Sampler.proposals_made` is what makes the
-difference visible.
+[proposals_made][evogfn.algorithms.base.Sampler.proposals_made] is what makes
+the difference visible.
 """
 
 from __future__ import annotations

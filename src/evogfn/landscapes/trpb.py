@@ -36,7 +36,7 @@ Values are FLIP2's, which normalise **wild-type to 1.0**. The PNAS paper and the
 `variationalsearch` redistribution instead normalise the **optimum** to 1.0; the
 two differ by the constant factor 2.4505 and are otherwise the same measurement
 (Pearson r = 0.9997 across all 159,129 variants). Wild-type-relative is the more
-useful convention here and matches :mod:`evogfn.landscapes.gb1`, where 1.0
+useful convention here and matches [evogfn.landscapes.gb1][], where 1.0
 is likewise wild-type, so reward functions transfer between the two without
 rescaling.
 
@@ -46,8 +46,11 @@ The 0.55% that were never measured
 871 combinations are absent from the assay. As in GB1, absent means *not
 recovered from the library*, not *unfit*. They are imputed as ``0.0`` by
 default -- which is close to the median measured fitness of 0.03, i.e. dead --
-and :meth:`TrpBLandscape.is_measured` exists so an analysis can exclude them
-instead. :attr:`TrpBLandscape.optimum` is likewise the best *measured* fitness.
+and
+[TrpBLandscape.is_measured][evogfn.landscapes.trpb.TrpBLandscape.is_measured]
+exists so an analysis can exclude them instead.
+[TrpBLandscape.optimum][evogfn.landscapes.trpb.TrpBLandscape.optimum] is
+likewise the best *measured* fitness.
 
 What this loader deliberately does not provide
 ----------------------------------------------
@@ -141,7 +144,7 @@ class TrpBLandscape(FitnessLandscape):
     Scoring is a table lookup, so evaluation is effectively free and the whole
     160,000-sequence space can be enumerated -- which is what makes exact regret
     and an exact target distribution available, as for
-    :class:`~evogfn.landscapes.gb1.GB1Landscape`.
+    [GB1Landscape][evogfn.landscapes.gb1.GB1Landscape].
 
     Args:
         unmeasured_value: Fitness returned for the 871 combinations absent from

@@ -8,16 +8,16 @@ in microseconds and whose optimum is known by construction.
 
 The definition, in the paper's notation:
 
-.. math::
+$$
+f(x) = \prod_{i=1}^{c} h_q(x, m^{(i)}, s^{(i)})
+\quad\text{if } x \in \mathcal{F},\quad -\infty \text{ otherwise}
+$$
 
-    f(x) = \prod_{i=1}^{c} h_q(x, m^{(i)}, s^{(i)})
-    \quad\text{if } x \in \mathcal{F},\quad -\infty \text{ otherwise}
-
-.. math::
-
-    h_q(x, m, s) = \max_{\ell} \left(
-        \sum_{j=1}^{k} \mathbb{1}\{x_{\ell + s_j} = m_j\}
-    \right) // (k/q) / q
+$$
+h_q(x, m, s) = \max_{\ell} \left(
+\sum_{j=1}^{k} \mathbb{1}\{x_{\ell + s_j} = m_j\}
+\right) // (k/q) / q
+$$
 
 A sequence scores by how well it satisfies each of ``c`` *spaced motifs*: an
 ordered set of ``k`` tokens at fixed relative offsets, which may appear anywhere
@@ -28,7 +28,9 @@ the epistasis.
 
 Feasibility is separate and harder. The feasible set
 
-.. math:: \mathcal{F} = \{x : A[x_{\ell-1}, x_{\ell}] > 0 \ \forall \ell \ge 2\}
+$$
+\mathcal{F} = \{x : A[x_{\ell-1}, x_{\ell}] > 0 \ \forall \ell \ge 2\}
+$$
 
 is induced by a discrete Markov process transition matrix ``A`` with some zero
 entries: certain token pairs simply cannot be adjacent. Uniformly random
@@ -72,7 +74,7 @@ class EhrlichLandscape(FitnessLandscape):
     Args:
         sequence_length: Length ``L`` of every sequence.
         vocab_size: Alphabet size ``v``. Must be at least
-            :data:`MIN_VOCAB_SIZE`.
+            `MIN_VOCAB_SIZE`.
         n_motifs: Number of motifs ``c`` that must be satisfied simultaneously.
         motif_length: Tokens per motif, ``k``.
         quantization: Number of reward levels per motif, ``q``. Must divide
@@ -188,7 +190,7 @@ class EhrlichLandscape(FitnessLandscape):
 
     @property
     def optimal_sequence(self) -> Tokens:
-        """A sequence achieving :attr:`optimum`.
+        """A sequence achieving [optimum][evogfn.landscapes.ehrlich.EhrlichLandscape.optimum].
 
         There may be others; this is the one the motifs were carved from.
         """

@@ -3,7 +3,7 @@
 A benchmark is not a landscape and a number. It is a set of *tests*, each chosen
 because it can settle a question the others cannot, run under a protocol a wet
 lab would recognise. This module holds only the shape of one such test; the
-tests themselves live in :mod:`evogfn.benchmark.suite`.
+tests themselves live in [evogfn.benchmark.suite][].
 
 That separation is the point, and it is enforced by there being nothing else
 here. A second list of tasks alongside the one the results come from is not
@@ -12,7 +12,7 @@ redundant, it is wrong: this module previously carried its own suite in which
 the name meant two different experiments depending on which import a reader
 followed, and nothing in either definition said which had produced the numbers.
 
-The one field a task cannot omit is :attr:`Task.purpose`. A suite is only as
+The one field a task cannot omit is `Task.purpose`. A suite is only as
 good as its ability to distinguish methods, so a row that cannot say what it
 decides that the others do not should be deleted rather than kept for
 completeness.

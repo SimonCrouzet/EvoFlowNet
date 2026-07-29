@@ -64,7 +64,8 @@ def run_provenance(**extra: Any) -> dict[str, Any]:  # noqa: ANN401 - forwarded 
         **extra: Additional fields to record, such as the seed.
 
     Returns:
-        A mapping suitable for :meth:`~evogfn.tracking.base.Tracker.log_config`.
+        A mapping suitable for
+        [log_config][evogfn.tracking.base.Tracker.log_config].
     """
     return {
         "evogfn_version": __version__,

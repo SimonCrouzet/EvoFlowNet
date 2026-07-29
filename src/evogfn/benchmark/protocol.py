@@ -27,7 +27,7 @@ sharp version: MLDE's entire claim is reaching the answer in ~480 assays instead
 of ~3,000, and a benchmark run at 10,000 has given that back before the first
 comparison is made.
 
-:data:`WET_LAB_PROTOCOLS` names the real ones so an experiment can cite a
+`WET_LAB_PROTOCOLS` names the real ones so an experiment can cite a
 campaign rather than a round number someone liked.
 """
 

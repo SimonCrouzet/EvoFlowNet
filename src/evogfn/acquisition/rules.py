@@ -1,9 +1,12 @@
 """Acquisition rules and batch selectors.
 
 The rules span the exploitation-exploration axis so the comparison can be run
-rather than assumed: :class:`Greedy` ignores uncertainty entirely,
-:class:`UpperConfidenceBound` and :class:`ExpectedImprovement` weight it, and
-:class:`Thompson` samples from the predictive distribution.
+rather than assumed: [Greedy][evogfn.acquisition.rules.Greedy] ignores
+uncertainty entirely,
+[UpperConfidenceBound][evogfn.acquisition.rules.UpperConfidenceBound] and
+[ExpectedImprovement][evogfn.acquisition.rules.ExpectedImprovement] weight it,
+and [Thompson][evogfn.acquisition.rules.Thompson] samples from the predictive
+distribution.
 
 Defaults follow Jain et al. (ICML 2022): UCB with ``kappa = 0.1``. That is a
 notably small weight -- close to greedy -- and worth knowing when reading their
@@ -166,8 +169,8 @@ class DiverseTopK(BatchSelector):
 
     Each pick maximises ``score - lambda * max_similarity_to_selected``, where
     similarity is one minus normalised Hamming distance. At ``lambda = 0`` this
-    is exactly :class:`TopK`, which makes the comparison a single knob rather
-    than two implementations.
+    is exactly [TopK][evogfn.acquisition.rules.TopK], which makes the comparison
+    a single knob rather than two implementations.
 
     This is the component experiment E4 turns on: whether the value of spreading
     a batch grows with its size, which is the question the two published nulls

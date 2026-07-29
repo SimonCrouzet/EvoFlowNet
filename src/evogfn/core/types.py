@@ -3,8 +3,8 @@
 Sequences are integer arrays of token indices, never strings. Every hot path in
 this library -- masking actions, scoring a batch, computing pairwise distances --
 is array work, and converting to and from text at each step would dominate the
-cost. :class:`Alphabet` is the single place that knows how indices relate to
-letters, so text appears only at the boundary.
+cost. [Alphabet][evogfn.core.types.Alphabet] is the single place that knows how
+indices relate to letters, so text appears only at the boundary.
 """
 
 from __future__ import annotations
@@ -88,7 +88,7 @@ class Alphabet:
         """The 20 standard amino acids.
 
         Returns:
-            An alphabet over :data:`AMINO_ACIDS`.
+            An alphabet over `AMINO_ACIDS`.
         """
         return cls.from_string(AMINO_ACIDS)
 
@@ -97,7 +97,7 @@ class Alphabet:
         """The four DNA bases.
 
         Returns:
-            An alphabet over :data:`DNA_BASES`.
+            An alphabet over `DNA_BASES`.
         """
         return cls.from_string(DNA_BASES)
 
