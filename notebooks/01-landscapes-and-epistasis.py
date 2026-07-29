@@ -256,11 +256,13 @@ env = MutationEnvironment(
     max_mutations=2,
     transitions=landscape.transition_matrix,
 )
-reachable = env.enumerate_terminal_states()
+ball = env.enumerate_terminal_states()
+reachable = env.reachable_terminal_states()
 
 print(f"whole space            {landscape.search_space_size:,}")
-print(f"reachable in 2 muts    {reachable.shape[0]:,}")
-print(f"...of which feasible   {int(landscape.is_feasible(reachable).sum()):,}")
+print(f"within 2 mutations     {ball.shape[0]:,}")
+print(f"...of which feasible   {int(landscape.is_feasible(ball).sum()):,}")
+print(f"...actually reachable  {reachable.shape[0]:,}")
 
 # %% [markdown]
 # Being able to write that set down enables one specific check, and it is the one
@@ -269,9 +271,18 @@ print(f"...of which feasible   {int(landscape.is_feasible(reachable).sum()):,}")
 # other metric here — best-found, top-K, diversity — can be satisfied by a good
 # hill climber that never samples anything. This one cannot. Notebook 3 runs it.
 #
-# Note the gap between the two counts: `enumerate_terminal_states` returns the
-# Hamming ball, which is an **upper bound** on what the environment can actually
-# construct once feasibility masking applies.
+# The three counts differ, and the second gap is the one that catches people out.
+# `enumerate_terminal_states` returns the Hamming ball. Filtering it by
+# feasibility still overcounts, because a *feasible destination* can be
+# unreachable: if every ordering of its mutations passes through an infeasible
+# intermediate, masking blocks the construction and the policy can never emit it.
+# `reachable_terminal_states` walks the environment's own masks and returns what
+# can actually be built.
+#
+# This matters beyond bookkeeping. Notebook 3 measures L1 distance to the target
+# distribution, and that measurement needs the right support: the same trained
+# policy scores 0.061 against the reachable set and 0.570 against the ball --
+# tenfold, and it reads as a broken policy rather than a mis-specified support.
 
 # %% [markdown]
 # ## GB1: real measurements, and the easiest geometry in the suite

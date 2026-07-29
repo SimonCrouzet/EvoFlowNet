@@ -218,43 +218,17 @@ print(f"oracle calls used: {result.oracle_calls:,}")
 # `max_mutations` — everything within two substitutions of the parent. That is
 # *not* what the masked environment can build. A design can be feasible and still
 # unreachable, if every ordering of its mutations passes through an infeasible
-# intermediate state. The docstring says as much: the Hamming ball is an upper
-# bound.
+# intermediate state: masking refuses that step in every order, so no path to the
+# design exists. Filtering the ball by feasibility does not find those — it is a
+# check on the destination, not on the way there.
 #
 # A target normalised over the wrong support is a target the policy is being
-# marked against unfairly. So walk the graph instead:
-
+# marked against unfairly. `reachable_terminal_states` walks the graph forward
+# with the environment's own masks and returns the real support:
 
 # %%
-def reachable_terminals(environment) -> np.ndarray:
-    """Breadth-first over the masked construction graph from the parent."""
-    from evogfn.env.base import State  # noqa: PLC0415 - only needed here
-
-    start = environment.parent
-    seen = {start.tobytes(): start}
-    frontier = [start]
-    while frontier:
-        batch = np.stack(frontier)
-        mask = environment.forward_mask(
-            State(sequences=batch, stopped=np.zeros(batch.shape[0], dtype=np.bool_))
-        )
-        nxt = []
-        for row, sequence in enumerate(batch):
-            for action in np.flatnonzero(mask[row]):
-                if action == environment.stop_action:
-                    continue
-                position, token = divmod(int(action), environment.alphabet.size)
-                child = sequence.copy()
-                child[position] = token
-                if child.tobytes() not in seen:
-                    seen[child.tobytes()] = child
-                    nxt.append(child)
-        frontier = nxt
-    return np.stack(list(seen.values()))
-
-
 ball = env.enumerate_terminal_states()
-space = reachable_terminals(env)
+space = env.reachable_terminal_states()
 print(f"Hamming ball of radius 2      {ball.shape[0]:,}")
 print(f"...feasible                   {int(landscape.is_feasible(ball).sum()):,}")
 print(f"...actually reachable         {space.shape[0]:,}  <- the real support")
