@@ -356,6 +356,31 @@ class CH65Landscape(FitnessLandscape):
         return self._ideal.copy()
 
     @property
+    def reference_point(self) -> Fitness:
+        r"""The Tite-Seq detection floor, `(6, 6, 6)` -- where hypervolume starts.
+
+        A reference point is a claim about the assay rather than a parameter of
+        an experiment: it is the worst value worth counting on each objective,
+        designs failing to beat it contribute no volume, and two hypervolumes
+        taken from different points are not comparable. This landscape is the
+        only object that holds the assay, so it is the only one entitled to
+        state it -- and a campaign picks it up automatically through
+        [StatesReferencePoint][evogfn.loop.campaign.StatesReferencePoint].
+
+        `CH65_DETECTION_FLOOR` is the defensible choice and not merely a
+        convenient one. It is where the titration stops resolving, so a variant
+        at 6.0 on an antigen is indistinguishable from a non-binder and has
+        genuinely contributed nothing on that objective. Pushing the point lower
+        would not be the safe option: every method would then earn the same
+        large constant box, and the differences a comparison is reading would
+        shrink into it.
+
+        Returns:
+            A `(3,)` array of `CH65_DETECTION_FLOOR` on each antigen.
+        """
+        return np.full(CH65_N_OBJECTIVES, CH65_DETECTION_FLOOR, dtype=np.float64)
+
+    @property
     def optimal_variants(self) -> tuple[str, ...]:
         """The best measured variant on each antigen, one per objective.
 

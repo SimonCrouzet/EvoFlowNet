@@ -595,12 +595,6 @@ class TestProposalsStayInsideTheMovedEnvironment:
             max_mutations=1,
             transitions=landscape.transition_matrix,
         )
-        rebuilt = []
-
-        def factory(moved):
-            rebuilt.append(moved)
-            return RandomMutagenesis(moved, feasible_only=True, seed=len(rebuilt))
-
         result = Campaign(
             landscape=landscape,
             sampler=RandomMutagenesis(env, feasible_only=True, seed=0),
@@ -609,7 +603,6 @@ class TestProposalsStayInsideTheMovedEnvironment:
             pool_size=64,
             environment=env,
             reanchor=True,
-            sampler_factory=factory,
         ).run()
 
         start = 0
@@ -624,7 +617,13 @@ class TestProposalsStayInsideTheMovedEnvironment:
             )
             assert anchored.is_reachable(batch).all()
             assert landscape.is_feasible(batch).all()
-        assert rebuilt, "the factory was never called, so nothing was re-anchored"
+        # Without this the assertions above would hold vacuously on a campaign
+        # that never moved: every round would be checked against the wild type,
+        # which is the environment the sampler was built on anyway. The sampler
+        # follows the anchor through its own `reanchored` hook rather than
+        # through a factory, which is the path a real campaign takes now that
+        # every baseline implements one.
+        assert max(result.anchor_trace()) > 0
 
 
 class TestReanchoringOnEhrlich:
@@ -713,17 +712,27 @@ class TestReanchoringIsRefusedWhenItCannotBeDone:
             )
 
     def test_a_factory_is_enough_for_a_sampler_that_cannot_be_told(self):
+        # RandomSampler deliberately has no `reanchored`, which is what makes
+        # this the factory path. Every baseline in the package implements the
+        # hook, so using one of those here would silently test the other branch.
         env = mutation_env(max_mutations=2)
+        rebuilt = []
+
+        def factory(moved):
+            rebuilt.append(moved)
+            return RandomSampler(seed=len(rebuilt))
+
         campaign = Campaign(
             landscape=CountingLandscape(),
-            sampler=RandomMutagenesis(env, seed=0),
+            sampler=RandomSampler(seed=0),
             rounds=3,
             batch_size=8,
             pool_size=64,
             environment=env,
             reanchor=True,
-            sampler_factory=lambda moved: RandomMutagenesis(moved, seed=1),
+            sampler_factory=factory,
         )
         result = campaign.run()
         assert max(result.anchor_trace()) > 0
+        assert rebuilt, "the factory was never called, so nothing was rebuilt"
         assert campaign.sampler is not None

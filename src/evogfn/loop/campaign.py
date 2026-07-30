@@ -625,9 +625,31 @@ class Campaign:
         finite = np.isfinite(flat)
         if not finite.any():
             return incumbent
-        position = int(np.flatnonzero(finite)[np.argmax(flat[finite])])
-        if float(flat[position]) <= incumbent:
+
+        best = float(flat[finite].max())
+        if best < incumbent:
             return incumbent
+        tied = np.flatnonzero(finite & (flat >= best))
+        if best > incumbent:
+            position = int(tied[0])
+        else:
+            # A tie, and moving is still right. Rewards here are products of
+            # quantised terms, so they are flat across most of a neighbourhood:
+            # requiring a strict improvement left whole campaigns anchored at
+            # the wild type -- measured, random and genetic traced [0, 0, 0, 0]
+            # over four rounds, so the mechanism never fired for them.
+            #
+            # Among equally good designs, take the one furthest from the current
+            # anchor. That crosses the plateau rather than sitting on it, and it
+            # is what a lab does with a flat round: carry forward the variant
+            # that opens the most new territory. Distance is the tie-break
+            # rather than chance, so the walk stays reproducible.
+            designs = np.asarray(batch)
+            parent = self._environment.parent
+            distance = (designs[tied] != parent).sum(axis=1)
+            position = int(tied[int(np.argmax(distance))])
+            if int((designs[position] != parent).sum()) == 0:
+                return incumbent
 
         env = self._environment.reanchored(np.asarray(batch)[position])
         if isinstance(self._sampler, ReanchorableSampler):

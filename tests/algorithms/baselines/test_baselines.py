@@ -299,3 +299,90 @@ class TestMultiObjectiveValuesAreRefused:
         sampler = make(env)
         batch = sampler.propose(4)
         sampler.observe(batch, toy_landscape(batch).reshape(-1))
+
+
+#: Hill climbing and annealing, both configured to respect the adjacency rule.
+LOCAL_SEARCHERS = [
+    lambda env: HillClimbing(env, feasible_only=True, seed=0),
+    lambda env: SimulatedAnnealing(env, feasible_only=True, seed=0),
+]
+
+
+class TestLocalSearchUnderAConstraint:
+    """What a hill climber and an annealer do when a neighbour is illegal.
+
+    They used to hold position: keep the current design wherever the drawn
+    neighbour violated the adjacency rule. That never raises and never emits an
+    unbuildable design, so it reads as the safe choice -- and on a sparse
+    feasible set, where all but a few percent of single substitutions are
+    illegal, it turns a plate of designs into a plate of identical copies of one
+    design. The campaign deduplicates, the round measures a single variant, and
+    the arm looks like a search that cannot move. Redrawing is the repair, and
+    the redraws are charged for.
+    """
+
+    def sparse_env(self, length=16, vocab=6, seed=0):
+        """A transition matrix sparse enough that most substitutions are illegal."""
+        rng = np.random.default_rng(seed)
+        matrix = np.zeros((vocab, vocab), dtype=np.float64)
+        order = rng.permutation(vocab)
+        matrix[order, np.roll(order, -1)] = 1.0
+        matrix[rng.random((vocab, vocab)) < 0.15] = 1.0
+        permitted = matrix > 0
+        parent = np.zeros(length, dtype=np.int32)
+        parent[0] = rng.integers(0, vocab)
+        for position in range(1, length):
+            parent[position] = rng.choice(np.flatnonzero(permitted[parent[position - 1]]))
+        return MutationEnvironment(
+            parent,
+            Alphabet.from_string("ABCDEF"[:vocab]),
+            max_mutations=length - 2,
+            transitions=matrix,
+        )
+
+    @pytest.mark.parametrize("make", LOCAL_SEARCHERS)
+    def test_every_proposal_is_still_buildable(self, make):
+        env = self.sparse_env()
+        assert env.is_reachable(make(env).propose(48)).all()
+
+    @pytest.mark.parametrize(
+        ("build", "hold"),
+        [
+            (HillClimbing, lambda env: HillClimbing(env, feasible_only=True, max_attempts=0)),
+            (
+                SimulatedAnnealing,
+                lambda env: SimulatedAnnealing(env, feasible_only=True, max_attempts=0),
+            ),
+        ],
+    )
+    def test_redrawing_fills_the_plate_that_holding_position_wasted(self, build, hold):
+        # `max_attempts=0` is exactly the old behaviour, so this is the before
+        # and after. The quantity is wasted wells: a row that came back as the
+        # design the search already stands on buys no measurement, because the
+        # campaign has measured it and deduplicates it away. Holding returns 45
+        # of 48 that way; redrawing returns 4.
+        env = self.sparse_env()
+        redrawn = build(env, feasible_only=True, seed=0).propose(48)
+        held = hold(env).propose(48)
+
+        def wasted(proposals):
+            return int((proposals == env.parent[None, :]).all(axis=1).sum())
+
+        assert wasted(held) > 40
+        assert wasted(redrawn) < 10
+
+    @pytest.mark.parametrize("make", LOCAL_SEARCHERS)
+    def test_the_redraws_are_charged_as_proposals(self, make):
+        # The cost moves from silence to the proposal counter, which is where a
+        # constraint that makes proposing expensive is supposed to show up.
+        env = self.sparse_env()
+        sampler = make(env)
+        sampler.propose(48)
+        assert sampler.proposals_made > 48
+
+    @pytest.mark.parametrize("make", LOCAL_SEARCHERS)
+    def test_an_unconstrained_search_pays_nothing_extra(self, make):
+        env = make_env(length=8, max_mutations=4)
+        sampler = make(env)
+        sampler.propose(32)
+        assert sampler.proposals_made == 32

@@ -18,11 +18,97 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from evogfn.algorithms.base import Sampler
+from evogfn.algorithms.baselines._reanchor import carried_design
 from evogfn.algorithms.baselines._values import single_objective
 
 if TYPE_CHECKING:
     from evogfn.core.types import Fitness, Tokens
     from evogfn.env.mutation import MutationEnvironment
+
+
+def substituted(env: MutationEnvironment, current: Tokens, rng: np.random.Generator) -> Tokens:
+    """One random single-substitution neighbour of ``current``.
+
+    A position that already differs from the anchor may be changed again: the
+    environment forbids mutating a position twice along one *trajectory*, but
+    the sequence that results from revising an earlier substitution is a
+    different point in the same Hamming ball, reached by a different path.
+    Treating the trajectory constraint as a constraint on states would forbid a
+    local search from ever undoing a move -- for an annealer, whose whole
+    purpose is to accept moves it may later need to undo, that is fatal rather
+    than merely limiting -- and would shrink the neighbourhood toward nothing as
+    the search moved. At the budget only already-substituted positions may
+    change, since touching a fresh one would push the design out of the graph.
+
+    Args:
+        env: Supplies the anchor, the alphabet and the mutation budget.
+        current: The design to step away from.
+        rng: Draws the position and the replacement token.
+
+    Returns:
+        A single sequence one substitution from ``current``.
+    """
+    proposal = np.asarray(current).copy()
+    mutated = np.flatnonzero(proposal != env.parent)
+    at_budget = mutated.size >= env.max_mutations
+    available = mutated if at_budget else np.arange(env.sequence_length)
+    position = int(rng.choice(available))
+    alternatives = [t for t in range(env.alphabet.size) if t != proposal[position]]
+    proposal[position] = rng.choice(alternatives)
+    return proposal
+
+
+def redrawn_until_buildable(
+    env: MutationEnvironment,
+    current: Tokens,
+    proposals: Tokens,
+    rng: np.random.Generator,
+    attempts: int,
+) -> tuple[Tokens, int]:
+    """Redraw the neighbours the environment cannot build, and report the cost.
+
+    A local searcher under a feasibility constraint has a third option between
+    "emit something unbuildable" and "raise". The previous behaviour here was a
+    fourth and worse one: hold the current design wherever the drawn neighbour
+    was illegal. That never raises and never emits an infeasible design, so it
+    reads as safe -- and on a sparse feasible set, where 96% of single
+    substitutions are illegal, it quietly turns a plate of designs into 96
+    copies of one. After the campaign deduplicates, the round measures a single
+    variant. The search looks stalled and the diagnosis "annealing does not move
+    on constrained landscapes" would be a fact about this function.
+
+    Redrawing gives each illegal row fresh positions and tokens instead. The
+    feasible neighbours of a feasible design are a small but non-empty set --
+    the anchor is reachable and the graph is connected -- so a bounded number of
+    draws finds one most of the time, and holding position remains the fallback
+    for the rows it does not.
+
+    Args:
+        env: Supplies the anchor, alphabet, budget and feasibility rule.
+        current: The design the neighbours were drawn from. Feasible by
+            induction, since it was itself an accepted proposal.
+        proposals: The ``(n, length)`` neighbours drawn so far, modified in
+            place.
+        rng: Draws the replacements.
+        attempts: Redraw rounds before falling back to holding position.
+
+    Returns:
+        The proposals, every row now buildable, and how many extra draws that
+        cost. The count is charged to
+        [proposals_made][evogfn.algorithms.base.Sampler.proposals_made], because
+        a search that needs twenty draws per design is not as cheap as one that
+        needs one and the table has to be able to say so.
+    """
+    spent = 0
+    for _ in range(attempts):
+        unbuildable = np.flatnonzero(~env.is_reachable(proposals))
+        if unbuildable.size == 0:
+            return proposals, spent
+        for row in unbuildable:
+            proposals[row] = substituted(env, current, rng)
+        spent += int(unbuildable.size)
+    proposals[~env.is_reachable(proposals)] = current
+    return proposals, spent
 
 
 class RandomMutagenesis(Sampler):
@@ -58,6 +144,30 @@ class RandomMutagenesis(Sampler):
     def name(self) -> str:
         """Short label, marking whether feasibility is enforced."""
         return "RandomMutagenesis" + (" (feasible)" if self._feasible_only else "")
+
+    def reanchored(self, env: MutationEnvironment) -> RandomMutagenesis:
+        """Re-anchor, which for the null costs nothing because it holds nothing.
+
+        This is the one baseline for which the campaign's rebuild path would
+        have been adequate, and it implements the hook anyway so that the reason
+        is on the record rather than inferred from an absence: random
+        mutagenesis adapts to no measurement, so it has no learned state to
+        lose. Its only carried state is the random stream, and continuing that
+        stream rather than restarting it is what stops round three re-drawing
+        round one's library.
+
+        Args:
+            env: The re-anchored environment.
+
+        Returns:
+            A sampler drawing uniformly from the new anchor's neighbourhood.
+        """
+        moved = RandomMutagenesis(
+            env, feasible_only=self._feasible_only, max_attempts=self._max_attempts
+        )
+        moved._rng = self._rng
+        moved._proposals_made = self._proposals_made
+        return moved
 
     def propose(self, n: int) -> Tokens:
         """Draw ``n`` variants with a uniformly random number of mutations.
@@ -121,7 +231,12 @@ class HillClimbing(Sampler):
     Args:
         env: Supplies the parent, alphabet and mutation budget.
         patience: Rounds without improvement before restarting.
-        feasible_only: Discard neighbours that are not constructible.
+        feasible_only: Redraw neighbours that are not constructible, rather
+            than emitting them.
+        max_attempts: Redraw rounds before a row falls back to holding the
+            current design. See
+            [redrawn_until_buildable][evogfn.algorithms.baselines.mutagenesis.redrawn_until_buildable]
+            for why holding position is a fallback rather than the remedy.
         seed: Seeds proposals.
     """
 
@@ -131,6 +246,7 @@ class HillClimbing(Sampler):
         *,
         patience: int = 5,
         feasible_only: bool = False,
+        max_attempts: int = 50,
         seed: int = 0,
     ) -> None:
         """Start at the parent."""
@@ -138,6 +254,7 @@ class HillClimbing(Sampler):
         self._env = env
         self._patience = patience
         self._feasible_only = feasible_only
+        self._max_attempts = max_attempts
         self._rng = np.random.default_rng(seed)
         self._current = env.parent
         self._best_value = -np.inf
@@ -153,6 +270,46 @@ class HillClimbing(Sampler):
         """Best objective value observed so far."""
         return self._best_value
 
+    def reanchored(self, env: MutationEnvironment) -> HillClimbing:
+        """Carry the whole climb across the move, because none of it is relative.
+
+        A hill climber's state is a design, the value it scored, and how many
+        rounds it has gone without improving. A design is a sequence and a value
+        is a measurement; neither is expressed relative to an anchor, so all
+        three cross the move intact and the climb continues from exactly where
+        it stood. In the ordinary case it does not even move: the campaign
+        anchors at the best design measured, which is usually the very design
+        the climber is standing on, so it resumes at zero mutations from the new
+        anchor with its whole neighbourhood ahead of it.
+
+        The one thing worth guarding is the case where the two disagree. The
+        campaign picks its anchor through the acquisition rule over the batch,
+        the climber through its own record, so the incumbent can end up outside
+        the new mutation budget -- at which point every neighbour it proposed
+        would be a design the environment cannot build.
+        [carried_design][evogfn.algorithms.baselines._reanchor.carried_design]
+        restarts it at the anchor in that case, which is the better of the two
+        points anyway.
+
+        Args:
+            env: The re-anchored environment.
+
+        Returns:
+            A climber over ``env``, standing where this one stood.
+        """
+        moved = HillClimbing(
+            env,
+            patience=self._patience,
+            feasible_only=self._feasible_only,
+            max_attempts=self._max_attempts,
+        )
+        moved._current = carried_design(env, self._current)
+        moved._best_value = self._best_value
+        moved._stale = self._stale
+        moved._rng = self._rng
+        moved._proposals_made = self._proposals_made
+        return moved
+
     def propose(self, n: int) -> Tokens:
         """Return ``n`` neighbours of the current design.
 
@@ -162,34 +319,17 @@ class HillClimbing(Sampler):
         Returns:
             An ``(n, sequence_length)`` array.
         """
-        parent = self._env.parent
-        length = self._env.sequence_length
-        size = self._env.alphabet.size
         proposals = np.tile(self._current, (n, 1))
-
         for row in range(n):
-            # A position that already differs from the parent may be changed
-            # again: the environment forbids mutating a position twice along one
-            # *trajectory*, but the resulting sequence is a different point in
-            # the same Hamming ball and is reached by a different path. Treating
-            # the trajectory constraint as a state constraint would forbid hill
-            # climbing from ever revising a bad substitution -- which is most of
-            # what hill climbing is for -- and would shrink its neighbourhood
-            # toward nothing as it moved.
-            # At the budget only already-substituted positions can change,
-            # since touching a fresh one would exceed it.
-            mutated = np.flatnonzero(proposals[row] != parent)
-            at_budget = mutated.size >= self._env.max_mutations
-            available = mutated if at_budget else np.arange(length)
-            position = int(self._rng.choice(available))
-            alternatives = [t for t in range(size) if t != proposals[row, position]]
-            proposals[row, position] = self._rng.choice(alternatives)
+            proposals[row] = substituted(self._env, self._current, self._rng)
 
+        extra = 0
         if self._feasible_only:
-            reachable = self._env.is_reachable(proposals)
-            proposals[~reachable] = self._current
+            proposals, extra = redrawn_until_buildable(
+                self._env, self._current, proposals, self._rng, self._max_attempts
+            )
 
-        self._count(n)
+        self._count(n + extra)
         return proposals
 
     def observe(self, sequences: Tokens, values: Fitness) -> None:

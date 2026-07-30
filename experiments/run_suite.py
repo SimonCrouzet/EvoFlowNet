@@ -10,6 +10,24 @@ tier's seed count from 30 to 50 costs twenty campaigns per arm, not fifty.
     uv run python experiments/run_suite.py --report         # no runs, just read
 
 Results land under ``results/`` as one JSONL file per task and method.
+
+What the regret column is, and what it is not
+---------------------------------------------
+
+Regret here is against the **attainable** optimum -- what
+[evogfn.benchmark.attainable][] measured a task's search space to contain --
+rather than against the landscape's own. The two are not close. On
+``large-space`` 95% of the regret computed the old way was a floor no method
+could clear, so the part of the column that varied between arms, which is the
+only part a comparison reads, was whatever fraction was left.
+
+Where the audit could not close the bracket, the interval is printed and the
+regret is against its conservative end. A regret at or below zero therefore does
+not mean an arm was perfect; it means the arm matched everything the audit could
+construct, and the task has no demonstrated headroom left to separate it from a
+better method with. Those arms are named as **solved**, and comparisons drawn on
+them are marked vacuous rather than quietly reported -- a p-value against an arm
+sitting on the ceiling is a statement about the ceiling.
 """
 
 from __future__ import annotations
@@ -18,6 +36,9 @@ import argparse
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+import numpy as np
 
 from evogfn.benchmark.determinism import configure_determinism, is_deterministic
 from evogfn.benchmark.methods import BASELINES, OBJECTIVES, flow_objectives
@@ -33,6 +54,13 @@ from evogfn.benchmark.suite import (
     run_tier,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from evogfn.benchmark.attainable import AttainableOptimum
+    from evogfn.benchmark.store import RunRecord
+    from evogfn.benchmark.tasks import Task
+
 #: Seeds per tier. The main tiers differ because campaign cost differs by an
 #: order of magnitude between L=4 and L=256, not because the claims differ.
 MAIN_SEEDS = 100
@@ -42,6 +70,15 @@ DIAGNOSTIC_SEEDS = 50
 #: Everything except the flow objectives, which need a policy with a flow head
 #: and are compared separately in the objectives diagnostic.
 MAIN_METHODS = {**BASELINES, **OBJECTIVES}
+
+#: Share of an arm's seeds sitting on the attainable optimum before the task is
+#: called solved for that arm. Half is already fatal: a comparison against an arm
+#: that hits the ceiling on half its seeds is measuring the ceiling on those, and
+#: the p-value it reports is about the remainder.
+VACUOUS_SHARE = 0.5
+
+#: How close to the attainable optimum an arm has to sit to count as on it.
+SOLVED_TOLERANCE = 1e-9
 
 
 def tiers(main_seeds: int, diagnostic_seeds: int) -> list[Tier]:
@@ -78,8 +115,70 @@ def methods_for(tier: Tier) -> dict[str, object]:
     return dict(MAIN_METHODS)
 
 
+def attainable_for(task: Task) -> AttainableOptimum | None:
+    """What this task's search space was audited to contain.
+
+    Args:
+        task: The task being reported on.
+
+    Returns:
+        The audited optimum, or ``None`` for a task carrying no declaration or
+        measuring more than one objective -- where the landscape's optimum is an
+        ideal point and the gap to it is not a regret.
+    """
+    landscape = task.landscape()
+    optimum = landscape.optimum
+    if optimum is None or landscape.n_objectives != 1:
+        return None
+    return task.attainable_optimum(float(np.max(optimum)))
+
+
+def _attainable_line(attainable: AttainableOptimum | None) -> str:
+    """State the attainable optimum so a bound cannot be read as a measurement."""
+    if attainable is None:
+        return "  attainable: not audited, so no regret is reported for this task"
+    if attainable.exact is not None:
+        value = f"{attainable.exact:.4f} exact"
+    else:
+        value = f"[{attainable.lower:.4f}, {attainable.upper:.4f}]"
+    floor = attainable.regret_floor
+    gap = f"{floor[0]:.4f}" if np.isclose(*floor) else f"[{floor[0]:.4f}, {floor[1]:.4f}]"
+    return (
+        f"  attainable {value} of a nominal {attainable.nominal:.4f} "
+        f"at {attainable.budget} cumulative mutations; regret against the nominal "
+        f"would carry a floor of {gap}\n    ({attainable.method})"
+    )
+
+
+def _at_optimum(records: Mapping[int, RunRecord], attainable: AttainableOptimum | None) -> float:
+    """Share of an arm's seeds sitting on the attainable optimum.
+
+    Args:
+        records: The arm's stored records, by seed.
+        attainable: What the task can reach, or ``None`` when unaudited.
+
+    Returns:
+        A fraction in ``[0, 1]``, or ``nan`` when there is nothing to compare
+        against. ``nan`` rather than zero: "no audit" is a different statement
+        from "no seed reached it".
+    """
+    if attainable is None or not records:
+        return float("nan")
+    best = np.asarray([record.best for record in records.values()], dtype=np.float64)
+    usable = best[np.isfinite(best)]
+    if not usable.size:
+        return float("nan")
+    return float(np.mean(usable >= attainable.lower - SOLVED_TOLERANCE))
+
+
 def report(store: ResultStore, tier: Tier, reference: str = "genetic+proxy") -> str:
     """Read the store and compare every arm against one, paired across seeds.
+
+    Regret is read straight from the records, where it is already against the
+    attainable optimum -- see `evogfn.benchmark.suite._scores`. What this adds is
+    the context that makes it readable: the interval the task can reach, how many
+    of an arm's seeds are sitting on it, and a refusal to present a paired
+    comparison drawn on a solved task as though it ranked anything.
 
     Args:
         store: Where results live.
@@ -93,9 +192,12 @@ def report(store: ResultStore, tier: Tier, reference: str = "genetic+proxy") -> 
     lines = []
     names = list(methods_for(tier))
     for task in tier.tasks:
-        lines.append(f"\n{task.name}  [{task.protocol!r}]")
+        attainable = attainable_for(task)
+        lines.append(f"\n{task!r}")
+        lines.append(_attainable_line(attainable))
         held = {name: store.usable(task.name, name) for name in names}
         seeds = [s for s in tier.seeds if all(s in held[n] for n in names if held[n])]
+        solved = set()
         for name in names:
             records = held[name]
             if not records:
@@ -105,10 +207,20 @@ def report(store: ResultStore, tier: Tier, reference: str = "genetic+proxy") -> 
             spread = records_to_metric(records, tier.seeds, "diversity")
             spent = records_to_metric(records, tier.seeds, "oracle_calls")
             error = regret.std(ddof=1) / len(regret) ** 0.5 if len(regret) > 1 else 0.0
+            share = _at_optimum(records, attainable)
+            if share >= VACUOUS_SHARE:
+                solved.add(name)
             lines.append(
                 f"  {name:<18} regret {regret.mean():>7.3f} +/- {error:<6.3f} "
-                f"feas {feasible.mean():>5.3f}  div {spread.mean():>5.2f}  "
-                f"spent {spent.mean():>6.0f}  n={len(regret)}"
+                f"at-opt {share:>5.2f}  feas {feasible.mean():>5.3f}  "
+                f"div {spread.mean():>5.2f}  spent {spent.mean():>6.0f}  n={len(regret)}"
+            )
+        for name in sorted(solved):
+            lines.append(
+                f"  SOLVED  {name} sits on the attainable optimum "
+                f"{attainable.lower:.4f} on {_at_optimum(held[name], attainable):.0%} of its "  # type: ignore[union-attr]
+                f"seeds; this task cannot rank it against anything better, and a "
+                f"comparison naming it is not a comparison of methods"
             )
 
         base = held.get(reference)
@@ -124,7 +236,15 @@ def report(store: ResultStore, tier: Tier, reference: str = "genetic+proxy") -> 
                 continue
             outcome = compare(name, mine, theirs, higher_is_better=False)
             lines.append(f"    {outcome!r}")
-            if not outcome.significant and (needed := seeds_needed(outcome)):
+            # Said before the p-value is read rather than after: an arm on the
+            # ceiling makes the difference a measurement of the ceiling, and
+            # significance there is significance about the task.
+            if vacuous := solved.intersection({name, reference}):
+                lines.append(
+                    f"        vacuous: {', '.join(sorted(vacuous))} already reached "
+                    f"everything this task was audited to contain"
+                )
+            elif not outcome.significant and (needed := seeds_needed(outcome)):
                 lines.append(f"        inconclusive; ~{needed} seeds would resolve this")
     return "\n".join(lines)
 

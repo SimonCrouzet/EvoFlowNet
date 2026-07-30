@@ -9,11 +9,14 @@ update into noise. And the step size can run away to an infinity on a round wher
 everything scored -inf. Each has its own test.
 """
 
+from itertools import product
+
 import numpy as np
 import pytest
 
 from evogfn.algorithms.base import Sampler
 from evogfn.algorithms.baselines import CMAES
+from evogfn.algorithms.baselines.cmaes import _project_onto_constructible
 from evogfn.core import Alphabet
 from evogfn.env.mutation import MutationEnvironment
 
@@ -217,26 +220,143 @@ class TestNumericalRobustness:
         assert (sampler._diagonal > 0.0).all()
 
 
+def sparse_transitions(vocab, seed=0):
+    """A transition matrix sparse enough that rejection sampling is hopeless.
+
+    Built as a Hamiltonian cycle plus a few extra edges, which is how
+    EhrlichLandscape builds one: the cycle keeps every token reachable, so a
+    feasible sequence exists, while the density stays low enough that a
+    uniformly drawn sequence is feasible with vanishing probability.
+    """
+    rng = np.random.default_rng(seed)
+    matrix = np.zeros((vocab, vocab), dtype=np.float64)
+    order = rng.permutation(vocab)
+    matrix[order, np.roll(order, -1)] = 1.0
+    matrix[rng.random((vocab, vocab)) < 0.1] = 1.0
+    return matrix
+
+
+def feasible_start(transitions, length, seed=0):
+    """A sequence the transition matrix admits, walked out of the chain itself."""
+    rng = np.random.default_rng(seed)
+    permitted = transitions > 0
+    sequence = np.zeros(length, dtype=np.int32)
+    sequence[0] = rng.integers(0, transitions.shape[0])
+    for position in range(1, length):
+        sequence[position] = rng.choice(np.flatnonzero(permitted[sequence[position - 1]]))
+    return sequence
+
+
 class TestFeasibility:
-    def test_a_rejecting_sampler_only_emits_constructible_designs(self):
-        transitions = constrained_transitions(4, [(0, 1), (1, 2), (2, 3)])
-        env = make_env(length=8, symbols="ABCD", max_mutations=3, transitions=transitions)
-        sampler = CMAES(env, feasible_only=True, seed=0)
+    """The relaxation cannot express an adjacency rule; the decoder must.
+
+    A separable Gaussian over per-position logits is a product distribution and
+    argmax is a product map, so nothing the search does can put its emissions
+    inside a set that couples adjacent positions. Before the projection existed
+    this arm scored -inf on every design of every seed of the benchmark's
+    feasibility task -- not rarely, never once. These tests pin down that the
+    projection fixes it, that it is exact rather than a nudge, and that it costs
+    no proposals.
+    """
+
+    def sparse_env(self, length=24, vocab=8, budget=None):
+        transitions = sparse_transitions(vocab)
+        parent = feasible_start(transitions, length)
+        return MutationEnvironment(
+            parent,
+            Alphabet.from_string("ABCDEFGH"[:vocab]),
+            max_mutations=length - 2 if budget is None else budget,
+            transitions=transitions,
+        )
+
+    def test_the_unrepaired_relaxation_emits_nothing_buildable(self):
+        # The diagnosis, kept as a test so the fix cannot be mistaken for having
+        # always worked. This is the behaviour that produced -inf on 100 seeds.
+        env = self.sparse_env()
+        proposals = CMAES(env, repair=False, seed=0).propose(64)
+        assert not env.is_reachable(proposals).any()
+
+    def test_repairing_makes_every_design_buildable(self):
+        env = self.sparse_env()
+        sampler = CMAES(env, seed=0)
         for _ in range(3):
-            proposals = sampler.propose(32)
+            proposals = sampler.propose(64)
             assert env.is_reachable(proposals).all()
             sampler.observe(proposals, toy_landscape(proposals))
 
-    def test_rejection_costs_proposals_rather_than_oracle_calls(self):
-        transitions = constrained_transitions(4, [(0, 1), (1, 2), (2, 3)])
-        env = make_env(length=8, symbols="ABCD", max_mutations=3, transitions=transitions)
-        plain = CMAES(env, seed=0)
-        rejecting = CMAES(env, feasible_only=True, seed=0)
-        plain.propose(32)
-        rejecting.propose(32)
-        assert rejecting.proposals_made > plain.proposals_made
+    def test_the_repair_does_not_collapse_onto_the_anchor(self):
+        # Emitting the parent every time would also be "buildable" and would be
+        # a useless search. The projection maximises the logits over the
+        # feasible set, so it should stay well out in the ball.
+        env = self.sparse_env()
+        proposals = CMAES(env, seed=0).propose(64)
+        distances = (proposals != env.parent[None, :]).sum(axis=1)
+        assert distances.mean() > env.sequence_length / 4
 
-    def test_an_impossible_constraint_raises_rather_than_returning_junk(self):
+    def test_the_projection_costs_no_extra_proposals(self):
+        # The cost of repair is wall clock, not proposals and not oracle calls.
+        # Rejection would have cost proposals -- unboundedly many, at this
+        # density -- so the distinction is the whole trade being reported.
+        env = self.sparse_env()
+        repairing = CMAES(env, seed=0)
+        repairing.propose(64)
+        assert repairing.proposals_made == 64
+
+    def test_the_repair_rate_reports_how_much_the_relaxation_contributed(self):
+        env = self.sparse_env()
+        sampler = CMAES(env, seed=0)
+        sampler.propose(64)
+        # On a sparse instance the raw argmax is never buildable, so the
+        # projection is doing all of the work and the number must say so.
+        assert sampler.repaired_fraction == 1.0
+
+    def test_an_unconstrained_landscape_needs_no_repair_at_all(self):
+        sampler = CMAES(make_env(length=8, max_mutations=8), seed=0)
+        sampler.propose(32)
+        assert sampler.repaired_fraction == 0.0
+
+    def test_repairing_is_exact_rather_than_approximate(self):
+        # The projection returns the *highest-scoring* constructible sequence,
+        # not merely a constructible one. Checked against brute force, because a
+        # repair that quietly returned something worse would look identical from
+        # the outside and would understate the baseline.
+        transitions = constrained_transitions(3, [(0, 1), (1, 2), (2, 0)])
+        env = MutationEnvironment(
+            np.zeros(4, dtype=np.int32),
+            Alphabet.from_string("ABC"),
+            max_mutations=3,
+            transitions=transitions,
+        )
+        rng = np.random.default_rng(0)
+        logits = rng.standard_normal((6, 4, 3))
+        decoded = _project_onto_constructible(logits, env.parent, transitions > 0, 3)
+        for row in range(6):
+            achieved = logits[row, np.arange(4), decoded[row]].sum()
+            best = max(
+                logits[row, np.arange(4), np.array(candidate)].sum()
+                for candidate in product(range(3), repeat=4)
+                if env.is_reachable(np.array(candidate)[None, :])[0]
+            )
+            assert achieved == pytest.approx(best)
+
+    def test_a_constraint_admitting_only_the_anchor_returns_the_anchor(self):
+        # Every adjacency but (0, 0) forbidden, and the parent is all zeros, so
+        # the anchor is the one design that can be built. Returning it is the
+        # correct answer; the old rejection loop raised instead, which reported
+        # a solvable instance as an impossible one.
+        forbidden = [(a, b) for a in range(4) for b in range(4) if (a, b) != (0, 0)]
+        env = make_env(
+            length=8,
+            symbols="ABCD",
+            max_mutations=3,
+            transitions=constrained_transitions(4, forbidden),
+        )
+        proposals = CMAES(env, seed=0).propose(16)
+        assert np.array_equal(proposals, np.tile(env.parent, (16, 1)))
+
+    def test_rejection_without_repair_still_raises(self):
+        # `feasible_only` is retained as the check on `repair`, and it must keep
+        # failing loudly when there is nothing to repair with.
         forbidden = [(a, b) for a in range(4) for b in range(4) if (a, b) != (0, 0)]
         env = make_env(
             length=8,
@@ -245,7 +365,11 @@ class TestFeasibility:
             transitions=constrained_transitions(4, forbidden),
         )
         with pytest.raises(RuntimeError, match="feasible"):
-            CMAES(env, feasible_only=True, max_attempts=3, seed=0).propose(32)
+            CMAES(env, repair=False, feasible_only=True, max_attempts=3, seed=0).propose(32)
+
+    def test_the_label_marks_an_unrepaired_run(self):
+        env = self.sparse_env()
+        assert CMAES(env, repair=False).name == "CMAES (unrepaired)"
 
 
 class TestValidation:

@@ -440,6 +440,84 @@ class MLDE(Sampler):
         """Short label, marking whether feasibility is enforced."""
         return "MLDE" + (" (feasible)" if self._feasible_only else "")
 
+    def reanchored(self, env: MutationEnvironment) -> MLDE:
+        """Carry the whole method across the move. Nothing about it is anchored.
+
+        MLDE holds a training set and a model fitted to it, and both are
+        anchor-free in the strict sense. The training set is pairs of a sequence
+        and a measured value; neither term mentions a parent. The model is a
+        kernel machine over one-hot sequences, and its kernel is the number of
+        positions at which two sequences agree -- a function of the two
+        sequences and of nothing else, so the Gram matrix a re-anchored MLDE
+        would compute is bit-for-bit the one it already has. The cross-validated
+        member selection, the fold instances, the centring offset and the median
+        bandwidth are all statistics of that same training set. So this carries
+        everything, and the claim in the class docstring is the exact claim: the
+        method loses **nothing** to a re-anchor.
+
+        That is worth stating against the alternative, because the alternative is
+        what the campaign does by default. A rebuilt MLDE has an empty training
+        set, which puts it back in the random-screening stage: it would spend
+        another `DEFAULT_TRAINING_SIZE` measurements re-learning what it
+        already knew, every time the anchor moved. Under a four-round campaign
+        of 96-design plates that is the entire budget, and a table reporting
+        that as MLDE's performance would be reporting an artefact of the
+        harness. Of every baseline here this is the one the rebuild path damages
+        most and the one re-anchoring costs least.
+
+        What does change is only where the *next* candidates come from: the pool
+        the ensemble ranks is drawn from the new anchor's neighbourhood, so the
+        explorer is rebuilt against ``env`` while keeping its random stream. The
+        model then scores designs further from the wild type than any it was
+        trained on, which is extrapolation and is the point of re-anchoring
+        rather than a defect of it.
+
+        Args:
+            env: The re-anchored environment. Must keep the sequence length,
+                since the kernel normalises by it and a training set of a
+                different length has no meaning under it.
+
+        Returns:
+            An MLDE over ``env``, carrying the dataset and the fitted ensemble.
+
+        Raises:
+            ValueError: If ``env`` changes the sequence length. Refused rather
+                than accepted because the kernel would silently mis-normalise
+                and the model would keep making predictions.
+        """
+        if env.sequence_length != self._env.sequence_length:
+            raise ValueError(
+                f"cannot carry a training set of length {self._env.sequence_length} into an "
+                f"environment of length {env.sequence_length}; the anchor may move but the "
+                f"sequence length may not"
+            )
+
+        moved = MLDE(
+            env,
+            training_size=self._training_size,
+            pool_multiplier=self._pool_multiplier,
+            cv_folds=self._cv_folds,
+            n_averaged=self._n_averaged,
+            feasible_only=self._feasible_only,
+            max_attempts=self._max_attempts,
+        )
+        # The roster carries the penalty sweep and kernel degrees the caller
+        # chose, which the constructor above would otherwise reset to defaults.
+        moved._roster = self._roster
+        moved._n_averaged = self._n_averaged
+        moved._sequences = list(self._sequences)
+        moved._values = list(self._values)
+        moved._measured = set(self._measured)
+        moved._fitted = None if self._fitted is None else self._fitted.copy()
+        moved._fits = list(self._fits)
+        moved._selected = self._selected
+        moved._offset = self._offset
+        moved._median_distance = self._median_distance
+        moved._stale = self._stale
+        moved._explorer._rng = self._explorer._rng
+        moved._proposals_made = self._proposals_made
+        return moved
+
     @property
     def is_fitted(self) -> bool:
         """Whether the ensemble has taken over from random screening."""
