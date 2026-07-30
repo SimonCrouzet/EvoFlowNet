@@ -55,7 +55,7 @@ from evogfn.algorithms.gflownet.objectives import (
     TrajectoryBalance,
     parameter_groups,
 )
-from evogfn.algorithms.gflownet.replay import replay_trajectories
+from evogfn.algorithms.gflownet.replay import replay
 from evogfn.algorithms.gflownet.sampling import sample_trajectories
 from evogfn.algorithms.gflownet.training import TrainingConfig, TrainingResult
 from evogfn.tracking.base import NoOpTracker
@@ -292,16 +292,32 @@ def train_genetic_gfn(  # noqa: PLR0913 - the run is defined by its parts
                 finite = np.flatnonzero(np.isfinite(bred_rewards))
                 chosen = finite[np.argsort(-bred_rewards[finite], kind="stable")][:n_genetic]
                 if chosen.size:
-                    replayed = replay_trajectories(
+                    # A design can be feasible, inside the budget, and still have
+                    # no path the policy could have taken to it, so replay scores
+                    # a subset. The rewards are filtered by the same mask: paired
+                    # against the unfiltered ones they are silently misaligned,
+                    # and each trajectory trains toward another design's reward.
+                    replayed, constructed = replay(
                         env, policy, offspring[chosen], generator=generator
                     )
-                    batches.append(
-                        (
-                            replayed,
-                            torch.as_tensor(bred_rewards[chosen], dtype=torch.float32),
+                    if constructed.any():
+                        batches.append(
+                            (
+                                replayed,
+                                torch.as_tensor(
+                                    bred_rewards[chosen][constructed], dtype=torch.float32
+                                ),
+                            )
                         )
-                    )
 
+        if not batches:
+            # Reachable only at ``mix = 1``, where there is no on-policy batch to
+            # fall back on and the genetic teacher can still come up empty: the
+            # buffer may be too small to breed from, or every offspring it bred
+            # may be unconstructible. A step with nothing to train on is skipped
+            # rather than made up, and the budget it would have spent is simply
+            # not spent.
+            continue
         loss = torch.stack([loss_fn.loss(t, r, policy) for t, r in batches]).mean()
         optimiser.zero_grad()
         loss.backward()  # type: ignore[no-untyped-call]

@@ -21,7 +21,7 @@ from evogfn.algorithms.gflownet.objectives import (
     balance_violation,
     parameter_groups,
 )
-from evogfn.algorithms.gflownet.replay import replay_trajectories
+from evogfn.algorithms.gflownet.replay import Replayed, replay, replay_trajectories
 from evogfn.algorithms.gflownet.sampler import GFlowNetSampler
 from evogfn.algorithms.gflownet.sampling import Trajectories, sample_trajectories
 from evogfn.algorithms.gflownet.training import (
@@ -43,6 +43,7 @@ __all__ = [
     "GFlowNetSampler",
     "GeneticConfig",
     "RankedBuffer",
+    "Replayed",
     "SubTrajectoryBalance",
     "TrainingConfig",
     "TrainingResult",
@@ -50,6 +51,7 @@ __all__ = [
     "TrajectoryBalance",
     "balance_violation",
     "parameter_groups",
+    "replay",
     "replay_trajectories",
     "sample_trajectories",
     "train_genetic_gfn",
