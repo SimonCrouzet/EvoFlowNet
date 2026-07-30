@@ -19,11 +19,41 @@ same surrogate instance the campaign refits, so training costs proxy evaluations
 and never oracle calls. The classical baselines are offered both blind and with
 the same proxy access, because comparing a method that optimises the model
 against one that only meets it as a filter is not a comparison of methods.
+
+Every methodology can follow a moved anchor
+-------------------------------------------
+
+A task that re-anchors moves its
+[MutationEnvironment][evogfn.env.mutation.MutationEnvironment] to the best design
+measured so far at the end of every round, and the campaign refuses at
+construction if the sampler cannot follow. There are two ways to follow, and the
+campaign prefers the first:
+
+* the sampler implements
+  [reanchored][evogfn.loop.campaign.ReanchorableSampler.reanchored] and says what
+  should happen to its own state -- a trained policy survives, a CMA-ES mean
+  decoded relative to the old parent does not;
+* the campaign rebuilds it from a factory, which is always correct and always
+  forgetful.
+
+Every methodology here supplies a factory, so no task can be configured to
+re-anchor and then fail at construction. The factories are written to close over
+whatever the rebuild must not lose -- the *same* `SequencePolicy` object, so a
+GFlowNet keeps its trained weights, and the *same* `ProxyLandscape`, so it keeps
+its link to the surrogate the campaign refits. What a rebuild does lose is the
+sampler's own accounting: `proxy_calls` and the round count restart, and
+[Campaign.sampler][evogfn.loop.campaign.Campaign.sampler] returns the rebuilt
+object, so a stored ``proxy_calls`` under re-anchoring counts the last anchor's
+rounds rather than the campaign's. That is the reason a sampler with state worth
+keeping should grow a `reanchored` hook rather than rely on the factory -- and
+because the campaign resolves the hook first, doing so takes effect here without
+any change to this module.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
+from itertools import count
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -64,6 +94,34 @@ DEFAULT_TRAINING_STEPS = 300
 
 #: Candidates generated per round before selection.
 DEFAULT_POOL = 2048
+
+
+def _anchor_seed(seed: int, generation: int) -> int:
+    """A distinct, reproducible seed for each anchor a campaign moves to.
+
+    A sampler rebuilt from a factory starts from its constructor, which means it
+    starts from its seed -- and a sampler re-seeded identically every round
+    proposes the identical pool every round. The campaign then deduplicates
+    almost all of it and the campaign stalls: measured directly, a random
+    mutagenesis arm re-proposed its first pool at every anchor and spent rounds
+    two onward on the tail of a batch it had already generated.
+
+    Reproducibility is not given up to fix it. The stream is a pure function of
+    the campaign's seed and how many times its anchor has moved, both of which
+    are fixed by the run, so a re-run reproduces it exactly.
+
+    Args:
+        seed: The campaign's seed.
+        generation: How many times the anchor has moved, from zero.
+
+    Returns:
+        The seed to build the sampler for that anchor with. Generation zero
+        returns `seed` unchanged, so a task that never re-anchors is bit-for-bit
+        what it was before the mechanism existed.
+    """
+    if generation == 0:
+        return seed
+    return int(np.random.SeedSequence([seed, generation]).generate_state(1)[0])
 
 
 def _parts(task: Task, seed: int) -> tuple[object, MutationEnvironment, DeepEnsemble]:
@@ -108,19 +166,40 @@ def _feasibility_of(landscape: object) -> npt.NDArray[np.floating] | None:
 def _campaign(
     task: Task,
     landscape: object,
-    sampler: Sampler,
+    env: MutationEnvironment,
+    build: Callable[[MutationEnvironment], Sampler],
     surrogate: DeepEnsemble | None,
 ) -> Campaign:
-    """Assemble a campaign under the task's protocol."""
+    """Assemble a campaign under the task's protocol, anchored where it says.
+
+    Args:
+        task: Fixes the protocol, the search radius and whether the anchor moves.
+        landscape: The oracle.
+        env: The environment the sampler was built against, handed to the
+            campaign so the ledger records which design each round searched from
+            and so the anchor has something to move.
+        build: Rebuilds the sampler for a moved anchor. Called once here for the
+            opening round, so the sampler the campaign starts with and the ones
+            it rebuilds come from one place and cannot drift apart.
+        surrogate: Model fitted to the measurements, or ``None`` for the
+            unassisted ablation.
+
+    Returns:
+        The campaign, which refuses at construction if the task asks to
+        re-anchor and anything needed for it is missing.
+    """
     return Campaign(
         landscape=landscape,  # type: ignore[arg-type]
-        sampler=sampler,
+        sampler=build(env),
         surrogate=surrogate,
         acquisition=Greedy(),
         selector=TopK(),
         rounds=task.protocol.rounds,
         batch_size=task.protocol.batch_size,
         pool_size=max(DEFAULT_POOL, task.protocol.batch_size * 4),
+        environment=env,
+        reanchor=task.reanchor,
+        sampler_factory=build,
     )
 
 
@@ -145,15 +224,24 @@ def classical(
 
     def methodology(task: Task, seed: int) -> Campaign:
         landscape, env, ensemble = _parts(task, seed)
-        sampler = build(env, seed)
-        if proxy_access:
-            proxy = ProxyLandscape(
-                ensemble,
-                alphabet=env.alphabet,
-                sequence_length=env.sequence_length,
-            )
-            sampler = ProxyOptimising(sampler, proxy=proxy)
-        return _campaign(task, landscape, sampler, ensemble if surrogate else None)
+        # One proxy for the whole campaign, closed over rather than rebuilt: it
+        # wraps the surrogate instance the campaign refits in place, and a fresh
+        # one per anchor would still see the same model but would make that
+        # dependence look accidental. Its shape does not change with the anchor.
+        proxy = (
+            ProxyLandscape(ensemble, alphabet=env.alphabet, sequence_length=env.sequence_length)
+            if proxy_access
+            else None
+        )
+
+        generation = count()
+
+        def make(anchored: MutationEnvironment) -> Sampler:
+            """Build the baseline against whichever anchor the campaign is at."""
+            sampler = build(anchored, _anchor_seed(seed, next(generation)))
+            return sampler if proxy is None else ProxyOptimising(sampler, proxy=proxy)
+
+        return _campaign(task, landscape, env, make, ensemble if surrogate else None)
 
     return methodology
 
@@ -182,6 +270,11 @@ def gflownet(
 
     def methodology(task: Task, seed: int) -> Campaign:
         landscape, env, ensemble = _parts(task, seed)
+        # The policy is built once and closed over, so a rebuild for a moved
+        # anchor keeps the trained weights. It survives the move because its
+        # action space -- length * |alphabet| + 1 indices -- and its input, the
+        # state sequence, are both properties of the space rather than of the
+        # anchor. Only the masks move.
         policy = SequencePolicy(
             n_actions=env.n_actions,
             sequence_length=env.sequence_length,
@@ -191,16 +284,23 @@ def gflownet(
             seed=seed,
         )
         proxy = ProxyLandscape(ensemble, alphabet=env.alphabet, sequence_length=env.sequence_length)
-        sampler = GFlowNetSampler(
-            env,
-            policy,
-            proxy=proxy,
-            reward=TemperedReward(beta=beta),
-            config=TrainingConfig(steps=steps, batch_size=64, seed=seed),
-            objective=objective,
-            seed=seed,
-        )
-        return _campaign(task, landscape, sampler, ensemble)
+
+        generation = count()
+
+        def make(anchored: MutationEnvironment) -> Sampler:
+            """Build the sampler against whichever anchor the campaign is at."""
+            stream = _anchor_seed(seed, next(generation))
+            return GFlowNetSampler(
+                anchored,
+                policy,
+                proxy=proxy,
+                reward=TemperedReward(beta=beta),
+                config=TrainingConfig(steps=steps, batch_size=64, seed=stream),
+                objective=objective,
+                seed=stream,
+            )
+
+        return _campaign(task, landscape, env, make, ensemble)
 
     return methodology
 
@@ -237,18 +337,31 @@ def genetic_gflownet(
             seed=seed,
         )
         proxy = ProxyLandscape(ensemble, alphabet=env.alphabet, sequence_length=env.sequence_length)
-        sampler = GFlowNetSampler(
-            env,
-            policy,
-            proxy=proxy,
-            reward=TemperedReward(beta=beta),
-            config=TrainingConfig(steps=steps, batch_size=64, seed=seed),
-            objective=objective,
-            genetic=GeneticAlgorithm(env, seed=seed),
-            genetic_config=GeneticConfig(offspring=64, warmup=max(steps // 10, 1)),
-            seed=seed,
-        )
-        return _campaign(task, landscape, sampler, ensemble)
+        generation = count()
+
+        def make(anchored: MutationEnvironment) -> Sampler:
+            """Build the sampler and a fresh teacher for the current anchor.
+
+            The policy carries over and the genetic teacher does not, which is
+            the right split rather than an oversight: a population bred around
+            the old parent can sit wholly outside the new mutation budget, so
+            re-seeding it at the new anchor is what keeps the teacher's
+            offspring inside the space the policy is being taught to sample.
+            """
+            stream = _anchor_seed(seed, next(generation))
+            return GFlowNetSampler(
+                anchored,
+                policy,
+                proxy=proxy,
+                reward=TemperedReward(beta=beta),
+                config=TrainingConfig(steps=steps, batch_size=64, seed=stream),
+                objective=objective,
+                genetic=GeneticAlgorithm(anchored, seed=stream),
+                genetic_config=GeneticConfig(offspring=64, warmup=max(steps // 10, 1)),
+                seed=stream,
+            )
+
+        return _campaign(task, landscape, env, make, ensemble)
 
     return methodology
 

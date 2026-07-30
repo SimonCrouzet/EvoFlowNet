@@ -24,6 +24,20 @@ The compute is not free, and is reported
 that does no inner search is visible rather than implied. Budget-wise the two are
 identical; wall-clock they are not, and a paper that hides that is making the
 same mistake in the other direction.
+
+The wrapper has to forward re-anchoring, or it silently undoes it
+------------------------------------------------------------------
+
+Every classical arm in the benchmark reaches the campaign wrapped in this class,
+so the campaign's ``isinstance`` check against
+[ReanchorableSampler][evogfn.loop.campaign.ReanchorableSampler] is a check on the
+*wrapper*, not on the sampler inside it. A wrapper that did not implement the
+hook would send every baseline down the rebuild path however carefully each one
+had implemented it -- MLDE's training set discarded, an annealer's schedule
+reset -- and nothing would raise, because rebuilding is a legitimate outcome.
+The comparison would then be between a GFlowNet that carried its policy and a
+set of baselines that were reconstructed from nothing every round, which is the
+result the whole exercise exists to avoid manufacturing.
 """
 
 from __future__ import annotations
@@ -36,6 +50,7 @@ from evogfn.algorithms.base import Sampler
 
 if TYPE_CHECKING:
     from evogfn.core.types import Fitness, Tokens
+    from evogfn.env.mutation import MutationEnvironment
     from evogfn.surrogate.proxy import ProxyLandscape
 
 #: Inner generations per round. Enough for a population method to converge on
@@ -91,6 +106,48 @@ class ProxyOptimising(Sampler):
     def proxy_calls(self) -> int:
         """Reward evaluations the inner loop spent on the proxy."""
         return self._proxy_calls
+
+    def reanchored(self, env: MutationEnvironment) -> ProxyOptimising:
+        """Move the wrapped sampler to ``env`` and re-wrap it unchanged.
+
+        The wrapper itself owns nothing anchored: the proxy is a surrogate over
+        sequences, and the generation and population counts are budgets. So this
+        forwards and keeps its own accounting -- including ``proxy_calls``,
+        which is a running total for the campaign and would understate the
+        method's compute if it restarted at each anchor.
+
+        Args:
+            env: The re-anchored environment.
+
+        Returns:
+            A wrapper around the re-anchored inner sampler.
+
+        Raises:
+            TypeError: If the wrapped sampler cannot re-anchor. The wrapper
+                cannot invent a re-anchoring the sampler does not have, and it
+                must not return itself either: it would then be a wrapper whose
+                inner sampler searches the previous round's Hamming ball, which
+                is wrong in a way that produces plausible designs. Raising names
+                the sampler so the caller can supply a ``sampler_factory``
+                instead.
+        """
+        from evogfn.loop.campaign import ReanchorableSampler  # noqa: PLC0415 - avoids a cycle
+
+        if not isinstance(self._sampler, ReanchorableSampler):
+            raise TypeError(
+                f"{self._sampler.name} does not implement reanchored(env), so the proxy "
+                f"wrapper around it cannot move either; pass a sampler_factory to the "
+                f"campaign to rebuild it instead"
+            )
+        moved = ProxyOptimising(
+            self._sampler.reanchored(env),
+            proxy=self._proxy,
+            generations=self._generations,
+            population=self._population,
+        )
+        moved._proxy_calls = self._proxy_calls
+        moved._proposals_made = self._proposals_made
+        return moved
 
     def propose(self, n: int) -> Tokens:
         """Search the proxy, then return ``n`` candidates from the result.

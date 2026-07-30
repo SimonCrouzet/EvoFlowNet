@@ -16,6 +16,7 @@ from evogfn.core.types import Alphabet
 from evogfn.env.mutation import MutationEnvironment
 from evogfn.landscapes.base import FitnessLandscape
 from evogfn.loop import Campaign
+from evogfn.loop.campaign import ReanchorableSampler
 from evogfn.surrogate import DeepEnsemble, ProxyLandscape
 
 ALPHABET = Alphabet.from_string("ACGT")
@@ -155,3 +156,65 @@ class TestInterface:
         sampler = ProxyOptimising(RandomMutagenesis(env), proxy=proxy)
         sampler.propose(12)
         assert sampler.proposals_made == 12
+
+
+class TestReanchoring:
+    """Every classical arm reaches the campaign through this wrapper.
+
+    So the campaign's ``isinstance`` check against ReanchorableSampler is a check
+    on the wrapper, and a wrapper that did not forward would send every baseline
+    down the rebuild path however carefully each one had implemented the hook --
+    silently, because rebuilding is a legitimate outcome.
+    """
+
+    def test_the_wrapper_satisfies_the_campaign_protocol(self, parts):
+        env, _, proxy = parts
+        assert isinstance(ProxyOptimising(GeneticAlgorithm(env), proxy=proxy), ReanchorableSampler)
+
+    def test_it_moves_the_wrapped_sampler(self, parts):
+        env, _, proxy = parts
+        anchor = np.array([1, 1, 1, 1, 0, 0], dtype=np.int32)
+        moved = ProxyOptimising(GeneticAlgorithm(env, seed=0), proxy=proxy).reanchored(
+            env.reanchored(anchor)
+        )
+        assert isinstance(moved.inner, GeneticAlgorithm)
+        # Proposals are now counted from the new anchor's ball, not the old one.
+        assert env.reanchored(anchor).is_reachable(moved.propose(16)).all()
+
+    def test_the_wrapped_state_survives_the_move(self, parts):
+        env, _, proxy = parts
+        inner = GeneticAlgorithm(env, population_size=16, seed=0)
+        sequences = inner.propose(16)
+        inner.observe(sequences, (sequences == 1).sum(axis=1, keepdims=True).astype(float))
+        moved = ProxyOptimising(inner, proxy=proxy).reanchored(env.reanchored(env.parent))
+        carried = moved.inner
+        assert isinstance(carried, GeneticAlgorithm)
+        assert np.array_equal(carried.population, inner.population)
+
+    def test_the_proxy_spend_keeps_accumulating(self, parts):
+        # A campaign total, not a per-anchor one: restarting it would understate
+        # the wall-clock cost of the arm by however many times it re-anchored.
+        env, surrogate, proxy = parts
+        fit(surrogate)
+        sampler = ProxyOptimising(
+            GeneticAlgorithm(env, seed=0), proxy=proxy, generations=2, population=8
+        )
+        sampler.propose(4)
+        spent = sampler.proxy_calls
+        assert spent > 0
+        assert sampler.reanchored(env.reanchored(env.parent)).proxy_calls == spent
+
+    def test_a_sampler_that_cannot_move_is_named_rather_than_faked(self, parts):
+        # Returning `self` would leave the inner sampler searching the previous
+        # round's Hamming ball, which produces plausible designs and no error.
+        env, _, proxy = parts
+        wrapped = ProxyOptimising(Immovable(), proxy=proxy)
+        with pytest.raises(TypeError, match="does not implement reanchored"):
+            wrapped.reanchored(env.reanchored(env.parent))
+
+
+class Immovable(Sampler):
+    """A sampler with no re-anchoring hook, to check the wrapper refuses."""
+
+    def propose(self, n):
+        return np.tile(PARENT, (n, 1))

@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from evogfn.algorithms.base import Sampler
+from evogfn.algorithms.baselines._reanchor import reprojected
 from evogfn.algorithms.baselines._values import single_objective
 
 if TYPE_CHECKING:
@@ -60,6 +61,15 @@ class GeneticAlgorithm(Sampler):
             too few parents to recombine. Stated because the argument beside it
             *does* carry its authors' value, and a reader is entitled to know
             which is which.
+        carry_population: Keep the population when the campaign moves the
+            anchor, re-projected onto the new mutation budget, rather than
+            founding a fresh one on the new anchor. On by default because it is
+            what genuinely transfers, but the choice is a real one and the
+            measurement is in
+            [reanchored][evogfn.algorithms.baselines.genetic.GeneticAlgorithm.reanchored]:
+            carrying wins decisively at a realistic per-round budget and loses
+            decisively at a loose one, because a rebuild is a restart at the
+            best design rather than a neutral act of forgetting.
         feasible_only: Resample offspring until constructible. The control for
             the feasibility claim; see the module docstring.
         max_attempts: Resampling rounds before giving up when
@@ -79,6 +89,7 @@ class GeneticAlgorithm(Sampler):
         mutation_prob: float | None = None,
         recombine_prob: float | None = None,
         survival_quantile: float = 0.25,
+        carry_population: bool = True,
         feasible_only: bool = False,
         max_attempts: int = 50,
         seed: int = 0,
@@ -91,6 +102,7 @@ class GeneticAlgorithm(Sampler):
         self._mutation_prob = 1.0 / length if mutation_prob is None else mutation_prob
         self._recombine_prob = 1.0 / length if recombine_prob is None else recombine_prob
         self._survival_quantile = survival_quantile
+        self._carry_population = carry_population
         self._feasible_only = feasible_only
         self._max_attempts = max_attempts
 
@@ -117,6 +129,114 @@ class GeneticAlgorithm(Sampler):
     def population(self) -> Tokens:
         """The current population."""
         return self._population.copy()
+
+    def reanchored(self, env: MutationEnvironment) -> GeneticAlgorithm:
+        """Carry the population across the move, re-projected onto the new ball.
+
+        The judgement this replaces is that a genetic algorithm is degraded
+        either way -- discarded on a rebuild, invalid if carried. The second
+        half of that is not right. A population is a set of sequences and a
+        sequence does not depend on an anchor; what depends on the anchor is
+        only whether each individual is still *inside the budget*, and the
+        algorithm already owns the operator for putting an over-budget design
+        back inside one, because its own crossover produces them every
+        generation. Re-anchoring re-uses it, through
+        [reprojected][evogfn.algorithms.baselines._reanchor.reprojected], so a
+        carried individual is indistinguishable from one the algorithm could
+        have bred.
+
+        **A re-projected individual loses its measurement.** Reverting a
+        substitution makes a different sequence, and the fitness on record was
+        measured on the old one. Keeping it would let selection promote a design
+        on the strength of an assay never run on it -- a fabricated result that
+        no later check could catch -- so those entries drop to ``-inf`` and the
+        individual has to earn a score again. Individuals that came through
+        untouched keep theirs, which is the part that genuinely transfers.
+        [carried_fitness][evogfn.algorithms.baselines.genetic.GeneticAlgorithm.carried_fitness]
+        reports how many that was.
+
+        Whether carrying is *better* is a measured question, and the answer is
+        not one thing
+        ------------------------------------------------------------------------
+
+        Do not read this method as an improvement to be assumed. Against a GA
+        rebuilt at the new anchor over six rounds of 96 on a continuous
+        additive-plus-pairwise landscape at ``L = 64``, paired on 25 seeds:
+
+        | per-round budget | carrying, against a rebuild | seeds better |
+        | ---------------- | --------------------------- | ------------ |
+        | 2 of 64          | **+15.2 +- 1.3**            | 25 / 25      |
+        | 4 of 64          | **+12.5 +- 1.8**            | 23 / 25      |
+        | 8 of 64          | -1.3 +- 2.3                 | 12 / 25      |
+        | 62 of 64         | **-7.9 +- 1.5**             | 3 / 25       |
+
+        At a realistic directed-evolution budget -- two to four substitutions a
+        round -- carrying wins on essentially every seed, and by a lot. At a
+        loose budget it *loses*, by a lot. The reason is that a rebuild is not
+        the neutral act of forgetting it looks like: the founding population is
+        ``population_size`` copies of the new anchor, so rebuilding is a
+        **restart at the best design measured**, with the population collapsed
+        onto it. On a loose ball that is a strong exploitation move and beats
+        carrying a diverse population around. On a tight ball it destroys the
+        only diversity the search had, and the collapsed population cannot
+        rebuild it inside one round's budget.
+
+        Which is why ``carry_population`` exists rather than this being wired
+        shut. The rebuild behaviour stays reachable *through this method*, so a
+        caller choosing it still gets the random stream carried across the move
+        -- the campaign's own factory fallback rebuilds at the original seed and
+        therefore re-proposes designs the campaign has already measured.
+
+        On this repository's Ehrlich tasks the question is close to moot for a
+        different reason: the value scale is coarse enough that ``best_so_far``
+        improves 0.4 times per four-round campaign, so the anchor rarely moves
+        at all and 30 of 40 seeds finish identically either way.
+
+        Args:
+            env: The re-anchored environment.
+
+        Returns:
+            A genetic algorithm over ``env``, carrying this one's population
+            when ``carry_population`` is set and founded on the new anchor
+            otherwise. This one's population and fitnesses are not edited,
+            though its random stream advances by the draws re-projection needed
+            -- the two samplers share one generator, which is what keeps a
+            campaign reproducible from a single seed across the move.
+        """
+        moved = GeneticAlgorithm(
+            env,
+            population_size=self._population_size,
+            mutation_prob=self._mutation_prob,
+            recombine_prob=self._recombine_prob,
+            survival_quantile=self._survival_quantile,
+            carry_population=self._carry_population,
+            feasible_only=self._feasible_only,
+            max_attempts=self._max_attempts,
+        )
+        if self._carry_population:
+            population, intact = reprojected(env, self._population, self._rng)
+            moved._population = population
+            moved._fitness = np.where(intact, self._fitness, -np.inf)
+        moved._rng = self._rng
+        moved._proposals_made = self._proposals_made
+        return moved
+
+    @property
+    def carried_fitness(self) -> int:
+        """Individuals holding a measurement that was taken on them.
+
+        Everything a genetic algorithm knows is in this number: it is the
+        population where the fitnesses are real. It starts at zero -- the
+        founding population is copies of the anchor with nothing measured -- and
+        after a re-anchor it is how much of the population survived the move
+        without being edited. Reading it across a campaign is how the question
+        "does carrying the population beat starting fresh" gets an answer rather
+        than an assumption.
+
+        Returns:
+            How many individuals carry a finite fitness.
+        """
+        return int(np.isfinite(self._fitness).sum())
 
     def propose(self, n: int) -> Tokens:
         """Generate ``n`` offspring from the surviving population.

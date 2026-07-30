@@ -93,6 +93,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from evogfn.algorithms.base import Sampler
+from evogfn.algorithms.baselines._reanchor import reprojected
 
 if TYPE_CHECKING:
     import numpy.typing as npt
@@ -234,16 +235,21 @@ def crowding_distance(values: Fitness) -> npt.NDArray[np.float64]:
         distance[order[0]] = np.inf
         distance[order[-1]] = np.inf
 
-        spread = sorted_values[-1] - sorted_values[0]
-        if not np.isfinite(spread) or spread <= 0.0:
-            # A constant objective separates nothing. An infinite spread is what
-            # an infeasible design scoring -inf produces, and normalising by it
-            # would turn every interior gap into nan -- which then propagates
-            # into the tournament and silently randomises selection. Either way
-            # this objective contributes nothing to the interior, while the
-            # boundaries above stay infinite.
+        # Read degeneracy off the endpoints rather than off their difference. A
+        # constant objective separates nothing; an endpoint at -inf is what an
+        # infeasible design scores, and normalising by the infinite spread that
+        # produces would turn every interior gap into nan, which propagates into
+        # the tournament and silently randomises selection. Both endpoints at
+        # -inf -- a whole front of designs that scored nothing, which is one
+        # round of infeasible proposals on a sparse landscape -- is worse still:
+        # the *subtraction itself* is `-inf - -inf`, a numpy invalid-value
+        # warning this project treats as an error, so the check has to come
+        # before it rather than after. Either way this objective contributes
+        # nothing to the interior, while the boundaries above stay infinite.
+        low, high = float(sorted_values[0]), float(sorted_values[-1])
+        if not (np.isfinite(low) and np.isfinite(high)) or high <= low:
             continue
-        distance[order[1:-1]] += (sorted_values[2:] - sorted_values[:-2]) / spread
+        distance[order[1:-1]] += (sorted_values[2:] - sorted_values[:-2]) / (high - low)
     return distance
 
 
@@ -279,6 +285,13 @@ class NSGA2(Sampler):
             crossover on a bit string, and this is the uniform operator
             [GeneticAlgorithm][evogfn.algorithms.baselines.genetic.GeneticAlgorithm]
             uses, at that class's rate, so the two baselines vary identically.
+        carry_population: Keep the population, its objective vectors and its
+            fronts when the campaign moves the anchor, rather than founding a
+            fresh one on the new anchor. On by default; the trade is the one
+            measured for
+            [GeneticAlgorithm][evogfn.algorithms.baselines.genetic.GeneticAlgorithm.reanchored],
+            and it is why the rebuild stays reachable through the hook rather
+            than only through the campaign's factory fallback.
         feasible_only: Resample offspring until constructible, rather than
             projecting them back into the graph. The control for the feasibility
             claim; see
@@ -299,6 +312,7 @@ class NSGA2(Sampler):
         mutation_prob: float | None = None,
         crossover_prob: float = PUBLISHED_CROSSOVER_PROB,
         recombine_prob: float | None = None,
+        carry_population: bool = True,
         feasible_only: bool = False,
         max_attempts: int = 50,
         seed: int = 0,
@@ -311,6 +325,7 @@ class NSGA2(Sampler):
         self._mutation_prob = 1.0 / length if mutation_prob is None else mutation_prob
         self._crossover_prob = crossover_prob
         self._recombine_prob = 1.0 / length if recombine_prob is None else recombine_prob
+        self._carry_population = carry_population
         self._feasible_only = feasible_only
         self._max_attempts = max_attempts
 
@@ -343,6 +358,70 @@ class NSGA2(Sampler):
     def population(self) -> Tokens:
         """The current population."""
         return self._population.copy()
+
+    def reanchored(self, env: MutationEnvironment) -> NSGA2:
+        """Carry the population, its objective vectors and its fronts.
+
+        The same argument as for
+        [GeneticAlgorithm][evogfn.algorithms.baselines.genetic.GeneticAlgorithm.reanchored],
+        and there is more at stake. A single-objective population carries one
+        number per individual; an approximated Pareto front is a *shape* built
+        up over generations, and discarding it on a rebuild throws away the
+        spread as well as the quality -- which is precisely what the indicators
+        this baseline exists to supply are measuring. A rebuilt NSGA-II reports
+        the hypervolume of a population of identical copies of the anchor, and a
+        method compared against that is compared against nothing.
+
+        Individuals outside the new mutation budget are re-projected by
+        [reprojected][evogfn.algorithms.baselines._reanchor.reprojected], and a
+        re-projected individual is a different design, so its objective vector
+        is dropped to ``-inf`` on every objective rather than carried onto a
+        sequence it was not measured on. Ranks and crowding distances are then
+        recomputed from what is left, because a front is a property of the
+        population and both would otherwise describe the population that used to
+        be there.
+
+        Args:
+            env: The re-anchored environment.
+
+        Returns:
+            An NSGA-II over ``env``, carrying this one's population and fronts.
+            This one is not edited, though its random stream advances by the
+            draws re-projection needed, as it does for
+            [GeneticAlgorithm][evogfn.algorithms.baselines.genetic.GeneticAlgorithm.reanchored].
+        """
+        moved = NSGA2(
+            env,
+            population_size=self._population_size,
+            mutation_prob=self._mutation_prob,
+            crossover_prob=self._crossover_prob,
+            recombine_prob=self._recombine_prob,
+            carry_population=self._carry_population,
+            feasible_only=self._feasible_only,
+            max_attempts=self._max_attempts,
+        )
+        if not self._carry_population:
+            moved._rng = self._rng
+            moved._proposals_made = self._proposals_made
+            return moved
+
+        population, intact = reprojected(env, self._population, self._rng)
+        moved._population = population
+        values = None if self._values is None else self._values.copy()
+        if values is not None:
+            values[~intact] = -np.inf
+        # A population with nothing measured left in it is the founding state,
+        # and is left as the constructor made it: ranks over an all -inf table
+        # are ties, and the crowding distance across a front whose every value
+        # is -inf is `inf - inf`. Selection would then tournament on nan and
+        # pick arbitrarily while looking like it was ranking.
+        if values is not None and bool(np.isfinite(values).any()):
+            moved._values = values
+            moved._ranks = fast_non_dominated_sort(values)
+            moved._crowding = moved._crowding_within_fronts(values, moved._ranks)
+        moved._rng = self._rng
+        moved._proposals_made = self._proposals_made
+        return moved
 
     @property
     def values(self) -> npt.NDArray[np.float64] | None:

@@ -39,13 +39,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Experiment tracking. Kept optional so the library, its tests and CI never
-# require an account or API key: the default tracker writes to the console.
-wandb = ["wandb>=0.17"]
 
-# Protein language model oracles (ESM-2). Heavy and GPU-oriented; the default
-# landscapes are closed-form or table-lookup and need none of this.
-plm = ["transformers>=4.44"]
+# pytorch-holo (Stanton et al.'s own Ehrlich implementation) is deliberately
+# NOT a dependency here, optional or otherwise: it requires numpy<2.0, which
+# drags this project's whole resolution backwards. It lives in its own
+# environment instead -- see notes/ for the path.
+
 
 # Torch build selection. These extras add no dependency -- torch is already
 # required -- they redirect it to a specific wheel index.

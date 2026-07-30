@@ -39,7 +39,9 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from evogfn.algorithms.base import Sampler
+from evogfn.algorithms.baselines._reanchor import carried_design
 from evogfn.algorithms.baselines._values import single_objective
+from evogfn.algorithms.baselines.mutagenesis import redrawn_until_buildable, substituted
 
 if TYPE_CHECKING:
     from evogfn.core.types import Fitness, Tokens
@@ -70,9 +72,13 @@ class SimulatedAnnealing(Sampler):
         min_temperature: Floor on the temperature, so the acceptance ratio never
             divides by zero and a long campaign degenerates gracefully into hill
             climbing rather than into a division error.
-        feasible_only: Hold the current design rather than emit a proposal that
-            is not constructible. Off by default, because a method that ignores
-            the constraint is what the constraint experiment compares against.
+        feasible_only: Redraw a neighbour that is not constructible rather than
+            emitting it. Off by default, because a method that ignores the
+            constraint is what the constraint experiment compares against.
+        max_attempts: Redraw rounds before a row falls back to holding the
+            current design. See
+            [redrawn_until_buildable][evogfn.algorithms.baselines.mutagenesis.redrawn_until_buildable]
+            for why holding position is the fallback and not the remedy.
         seed: Seeds proposals and the acceptance coin.
 
     Raises:
@@ -89,6 +95,7 @@ class SimulatedAnnealing(Sampler):
         cooling_rate: float = 0.5,
         min_temperature: float = 1e-3,
         feasible_only: bool = False,
+        max_attempts: int = 50,
         seed: int = 0,
     ) -> None:
         """Start the chain at the parent, at the initial temperature."""
@@ -109,6 +116,7 @@ class SimulatedAnnealing(Sampler):
         self._cooling_rate = cooling_rate
         self._min_temperature = min_temperature
         self._feasible_only = feasible_only
+        self._max_attempts = max_attempts
         self._rng = np.random.default_rng(seed)
         self._temperature = initial_temperature
         self._current = env.parent
@@ -138,6 +146,53 @@ class SimulatedAnnealing(Sampler):
         """Best objective value observed so far, accepted or not."""
         return self._best_value
 
+    def reanchored(self, env: MutationEnvironment) -> SimulatedAnnealing:
+        """Carry the chain and its schedule; nothing about them is anchored.
+
+        **The temperature survives, and it is worth saying so plainly because
+        the opposite is the intuitive guess.** A cooling schedule is a scalar in
+        objective units advanced once per round; it refers to the landscape's
+        fitness scale and to how long the search has been running, and to
+        nothing about which Hamming ball is being searched. Rebuilding the
+        annealer through a factory is what destroys it -- the new object starts
+        at ``initial_temperature``, so a chain that had cooled to 0.125 by round
+        four is hot again, and a cooled annealer suddenly wandering is not a
+        property of annealing but of how it was reconstructed. Implementing this
+        hook is what keeps the schedule the one the constructor described.
+
+        The chain's position, the value it sits at, and the best value it has
+        seen carry for the same reason: a sequence is a sequence and a
+        measurement is a measurement. Where the incumbent falls outside the new
+        budget the chain restarts at the anchor, via
+        [carried_design][evogfn.algorithms.baselines._reanchor.carried_design];
+        its accepted value is then no longer the value of where it stands, so it
+        is reset to ``-inf`` and the next finite measurement is accepted, which
+        is exactly how the chain starts. Carrying the old number instead would
+        have the Metropolis test compare candidates against a design the chain
+        is no longer on.
+
+        Args:
+            env: The re-anchored environment.
+
+        Returns:
+            An annealer over ``env``, at this one's temperature and position.
+        """
+        moved = SimulatedAnnealing(
+            env,
+            initial_temperature=self._temperature,
+            cooling_rate=self._cooling_rate,
+            min_temperature=self._min_temperature,
+            feasible_only=self._feasible_only,
+            max_attempts=self._max_attempts,
+        )
+        moved._current = carried_design(env, self._current)
+        held = bool(np.array_equal(moved._current, self._current))
+        moved._current_value = self._current_value if held else -np.inf
+        moved._best_value = self._best_value
+        moved._rng = self._rng
+        moved._proposals_made = self._proposals_made
+        return moved
+
     def propose(self, n: int) -> Tokens:
         """Return ``n`` single-substitution neighbours of the current design.
 
@@ -147,38 +202,24 @@ class SimulatedAnnealing(Sampler):
         Returns:
             An ``(n, sequence_length)`` array.
         """
-        parent = self._env.parent
-        length = self._env.sequence_length
-        size = self._env.alphabet.size
         proposals = np.tile(self._current, (n, 1))
-
         for row in range(n):
-            # A position already differing from the parent may be changed again.
-            # The environment forbids mutating a position twice along one
-            # *trajectory*; the sequence that results from revising an earlier
-            # substitution is a different point in the same Hamming ball,
-            # reached by a different path, and is perfectly reachable. Treating
-            # the trajectory constraint as a constraint on states would forbid
-            # the chain from ever undoing a move -- which for an annealer, whose
-            # whole purpose is to accept moves it may later need to undo, is
-            # fatal rather than merely limiting.
-            # At the budget only already-substituted positions may change, since
-            # touching a fresh one would push the design out of the graph.
-            mutated = np.flatnonzero(proposals[row] != parent)
-            at_budget = mutated.size >= self._env.max_mutations
-            available = mutated if at_budget else np.arange(length)
-            position = int(self._rng.choice(available))
-            alternatives = [t for t in range(size) if t != proposals[row, position]]
-            proposals[row, position] = self._rng.choice(alternatives)
+            proposals[row] = substituted(self._env, self._current, self._rng)
 
+        extra = 0
         if self._feasible_only:
-            # Hold position rather than resample: the current design is feasible
-            # by induction -- it was itself a feasible proposal -- so this cannot
-            # emit anything outside the graph, and it costs no extra proposals.
-            reachable = self._env.is_reachable(proposals)
-            proposals[~reachable] = self._current
+            # Redraw rather than hold position. Holding is what this used to do,
+            # and it costs no proposals precisely because it produces no
+            # designs: on a sparse feasible set almost every single substitution
+            # is illegal, so the round returns a plate of identical copies of
+            # the current design, deduplicates down to one measurement, and the
+            # chain stalls. The redraws are charged for, which is the honest way
+            # to report a constraint that makes proposing expensive.
+            proposals, extra = redrawn_until_buildable(
+                self._env, self._current, proposals, self._rng, self._max_attempts
+            )
 
-        self._count(n)
+        self._count(n + extra)
         return proposals
 
     def observe(self, sequences: Tokens, values: Fitness) -> None:

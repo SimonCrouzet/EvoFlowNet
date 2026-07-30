@@ -2,10 +2,14 @@
 
 Three things are under test, and only the first is about this module's code.
 
-**The suite's budgets.** ``test_planted_optimum_is_within_budget`` is the check
-whose absence let every Ehrlich task in ``MAIN`` report regret against a target
-outside its own search space. It is the reason this file exists, and it is
-deliberately the cheapest test here so nothing tempts anyone to skip it.
+**The suite's budgets.** ``test_a_task_out_of_reach_of_its_own_optimum_declares_it``
+is the check whose absence let every Ehrlich task in ``MAIN`` report regret
+against a target outside its own search space. It is the reason this file
+exists, and it is deliberately the cheapest test here so nothing tempts anyone
+to skip it. Its shape has changed with the suite's -- the radius is per round
+now and the anchor moves, so the question is no longer whether the optimum is
+inside one Hamming ball but whether the task states what it can reach. What is
+being prevented is unchanged.
 
 **The bracket.** A bound that is wrong is worse than no bound, because it reads
 like a fact. Where the reachable set is small enough to enumerate, the exact
@@ -33,7 +37,7 @@ from evogfn.benchmark.attainable import (
     reanchored_attainable,
 )
 from evogfn.benchmark.protocol import Protocol
-from evogfn.benchmark.suite import MAIN, budget_gradient, objective_task, rounds_curve
+from evogfn.benchmark.suite import CAPPED, MAIN, budget_gradient, objective_task, rounds_curve
 from evogfn.benchmark.tasks import Task
 from evogfn.env.mutation import MutationEnvironment
 from evogfn.landscapes.ehrlich import EhrlichLandscape
@@ -80,30 +84,55 @@ def environment(task):
 
 
 # --------------------------------------------------------------------------
-# The regression test: a budget that cannot reach the answer is a broken task.
+# The regression test: a task measured against a target it cannot reach.
 # --------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("task", MAIN, ids=lambda t: t.name)
-def test_planted_optimum_is_within_budget(task):
-    distance = planted_distance(task)
-    if distance is None:
-        pytest.skip(f"{task.name} has no planted optimal sequence")
-    assert distance <= task.max_mutations, (
-        f"{task.name} plants its optimum {distance} substitutions from the parent but allows "
-        f"{task.max_mutations}; every regret reported on it carries a floor no method can clear"
-    )
+#
+# The question this asks has moved, and the reason is worth stating. It used to
+# be "is the planted optimum inside `max_mutations`", and the honest answer under
+# the suite's current shape is *no, on every Ehrlich task, by design*: the radius
+# is one round of mutagenesis and the planted optimum is 32 to 248 substitutions
+# away. What clears that distance is the campaign re-anchoring, so the radius
+# alone can no longer settle anything.
+#
+# What replaces it is the same failure caught one level up. A task may report
+# regret against a target outside its reach only if it *says so* -- by declaring
+# what it can reach, and by carrying the phrase `experiments/audit_optima.py`
+# greps for. A task that carries neither is the original defect exactly.
 
 
 @pytest.mark.parametrize(
     "task",
-    [*budget_gradient(), *rounds_curve(), objective_task()],
+    [*MAIN, *budget_gradient(), *rounds_curve(), objective_task()],
     ids=lambda t: t.name,
 )
-def test_diagnostic_planted_optimum_is_within_budget(task):
+def test_a_task_out_of_reach_of_its_own_optimum_declares_it(task):
     distance = planted_distance(task)
-    assert distance is not None
-    assert distance <= task.max_mutations
+    if distance is None:
+        pytest.skip(f"{task.name} has no planted optimal sequence")
+    assert task.attainable is not None, (
+        f"{task.name} declares no attainable optimum, so every regret reported on it is "
+        f"against a target nobody has checked is reachable"
+    )
+    if distance <= task.search_budget:
+        return
+    assert CAPPED in task.purpose, (
+        f"{task.name} plants its optimum {distance} substitutions from the parent and can "
+        f"reach {task.search_budget}, and its purpose does not say the radius is capped on "
+        f"purpose; that gap is a defect in the task rather than a property of it"
+    )
+
+
+@pytest.mark.parametrize("task", MAIN, ids=lambda t: t.name)
+def test_the_per_round_radius_is_below_the_sequence_length(task):
+    # A radius at or above the sequence length is not a constraint, and a task
+    # claiming to measure constrained search under one measures nothing.
+    length = task.landscape().sequence_length
+    assert task.max_mutations <= length
+    if task.name != "gb1-anchor":
+        assert task.protocol.constrains_search(length), (
+            f"{task.name} allows {task.max_mutations} of {length} positions per round, so its "
+            f"mutation budget does not restrict anything"
+        )
 
 
 @pytest.mark.parametrize("task", MAIN, ids=lambda t: t.name)
