@@ -95,6 +95,9 @@ DEFAULT_TRAINING_STEPS = 300
 #: Candidates generated per round before selection.
 DEFAULT_POOL = 2048
 
+#: Genetic-GFN's offline mixing ratio, after Jain et al. (2022).
+DEFAULT_MIX = 0.5
+
 
 def _anchor_seed(seed: int, generation: int) -> int:
     """A distinct, reproducible seed for each anchor a campaign moves to.
@@ -310,6 +313,7 @@ def genetic_gflownet(
     *,
     steps: int = DEFAULT_TRAINING_STEPS,
     beta: float = DEFAULT_BETA,
+    mix: float = DEFAULT_MIX,
 ) -> Methodology:
     """A GFlowNet taught by a genetic algorithm, after Kim et al. (2024).
 
@@ -322,6 +326,11 @@ def genetic_gflownet(
         objective: How balance violation is measured.
         steps: Gradient steps per round.
         beta: Reward exponent.
+        mix: Share of each training batch bred by the genetic teacher rather
+            than sampled from the policy. This is the knob the method is *about*
+            -- at zero it is an ordinary GFlowNet and at one the policy only
+            ever sees the GA's offspring -- so it is exposed rather than left at
+            the config default.
 
     Returns:
         A methodology.
@@ -357,7 +366,7 @@ def genetic_gflownet(
                 config=TrainingConfig(steps=steps, batch_size=64, seed=stream),
                 objective=objective,
                 genetic=GeneticAlgorithm(anchored, seed=stream),
-                genetic_config=GeneticConfig(offspring=64, warmup=max(steps // 10, 1)),
+                genetic_config=GeneticConfig(offspring=64, mix=mix, warmup=max(steps // 10, 1)),
                 seed=stream,
             )
 
@@ -449,6 +458,59 @@ def flow_objectives() -> dict[str, Methodology]:
         "gfn-subtb": gflownet(SubTrajectoryBalance(lam=0.9), learn_flow=True),
         "gfn-fldb": gflownet(ForwardLookingDetailedBalance(), learn_flow=True),
     }
+
+
+#: The GFlowNet settings this project has never measured, and the values to
+#: measure them at. Each was inherited rather than chosen: ``steps`` because 300
+#: ran in acceptable time, ``beta`` from Jain et al. (2022), ``mix`` from
+#: Kim et al.'s (2024) offline ratio. A headline comparison against baselines
+#: tuned to their own papers, run at settings nobody tuned, measures the
+#: settings -- so what this grid is for is establishing that the reported
+#: configuration is not a bad one, and saying by how much it could be beaten.
+#:
+#: Values bracket each default above and below rather than extending in one
+#: direction, so a monotone column is legible as "the grid is too narrow" rather
+#: than being mistaken for an optimum.
+SENSITIVITY_GRID: dict[str, tuple[float, ...]] = {
+    "steps": (100.0, float(DEFAULT_TRAINING_STEPS), 900.0),
+    "beta": (1.0, DEFAULT_BETA, 10.0),
+    "mix": (0.0, DEFAULT_MIX, 1.0),
+}
+
+
+def sensitivity() -> dict[str, Methodology]:
+    """One arm per hyperparameter value, varying one axis at a time.
+
+    One at a time rather than a full grid: the full cross of
+    `SENSITIVITY_GRID` is 27 arms where this is 9, and the question being asked
+    is whether any single setting is badly chosen -- not where the joint optimum
+    sits, which this benchmark has nothing like the seed count to locate.
+
+    The arm at each default duplicates a configuration the objectives
+    diagnostic already runs -- ``steps-300`` and ``beta-3`` are ``gfn-tb``,
+    ``mix-0.5`` is ``genetic-gfn`` -- and is re-run anyway. It costs two extra
+    arms on the cheapest landscape in the suite, and it buys an axis that reads
+    as a curve on its own terms rather than as two measured points plus a
+    cross-reference to another tier's table.
+
+    Returns:
+        Methodologies by name, named ``<axis>-<value>`` so a report groups them.
+    """
+    arms: dict[str, Methodology] = {}
+    for axis, values in SENSITIVITY_GRID.items():
+        for value in values:
+            name = f"{axis}-{value:g}"
+            if axis == "steps":
+                arms[name] = gflownet(TrajectoryBalance(), steps=int(value))
+            elif axis == "beta":
+                arms[name] = gflownet(TrajectoryBalance(), beta=value)
+            else:
+                # `mix` belongs to the genetic teacher, so it varies the arm
+                # that has one. Its endpoints are the method's own limits: at 0
+                # this is plain `gfn-tb` and at 1 the policy never samples for
+                # itself, which brackets the claim that the hybrid beats both.
+                arms[name] = genetic_gflownet(TrajectoryBalance(), mix=value)
+    return arms
 
 
 def default_methodologies() -> dict[str, Methodology]:
