@@ -41,7 +41,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from evogfn.benchmark.determinism import configure_determinism, is_deterministic
-from evogfn.benchmark.methods import BASELINES, OBJECTIVES, flow_objectives
+from evogfn.benchmark.methods import BASELINES, OBJECTIVES, flow_objectives, sensitivity
 from evogfn.benchmark.statistics import compare, seeds_needed
 from evogfn.benchmark.store import ResultStore
 from evogfn.benchmark.suite import (
@@ -96,6 +96,10 @@ def tiers(main_seeds: int, diagnostic_seeds: int) -> list[Tier]:
     expensive = tuple(t for t in MAIN if t.name == "large-space")
     return [
         Tier("objectives", (objective_task(),), tuple(range(diagnostic_seeds)), headline=False),
+        # Shares the objectives task deliberately: same landscape, same
+        # protocol, same seeds, so a setting's effect and an objective's are
+        # measured against each other rather than across two configurations.
+        Tier("sensitivity", (objective_task(),), tuple(range(diagnostic_seeds)), headline=False),
         Tier("main", cheap, tuple(range(main_seeds)), headline=True),
         Tier("rounds-curve", rounds_curve(), tuple(range(diagnostic_seeds)), headline=False),
         Tier("budget-gradient", budget_gradient(), tuple(range(diagnostic_seeds)), headline=False),
@@ -108,10 +112,14 @@ def methods_for(tier: Tier) -> dict[str, object]:
     """Which methodologies a tier runs.
 
     The objectives diagnostic is GFlowNet-only, since a classical baseline has
-    no training objective to vary; everything else compares methods.
+    no training objective to vary; the sensitivity tier is narrower still, being
+    one GFlowNet with one setting moved at a time; everything else compares
+    methods.
     """
     if tier.name == "objectives":
         return {**OBJECTIVES, **flow_objectives()}
+    if tier.name == "sensitivity":
+        return dict(sensitivity())
     return dict(MAIN_METHODS)
 
 
