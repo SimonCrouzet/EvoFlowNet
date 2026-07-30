@@ -21,9 +21,10 @@ mask can only ever traverse real edges.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
+import numpy.typing as npt
 import torch
 
 from evogfn.algorithms.gflownet.sampling import Trajectories, _multinomial
@@ -34,6 +35,48 @@ if TYPE_CHECKING:
     from evogfn.core.types import Tokens
     from evogfn.env.base import SequenceEnvironment
     from evogfn.models.policy import SequencePolicy
+
+
+class Replayed(NamedTuple):
+    """What replay produced, and which of the inputs it produced it for.
+
+    Attributes:
+        trajectories: Scored trajectories, one per *constructible* terminal.
+        constructed: An ``(n,)`` mask over the terminals as supplied, true where
+            a path was found. Anything a caller holds alongside the terminals --
+            rewards, most importantly -- has to be filtered by this before it is
+            paired with `trajectories`, which is shorter whenever the mask is
+            not all true.
+    """
+
+    trajectories: Trajectories
+    constructed: npt.NDArray[np.bool_]
+
+
+def replay(
+    env: SequenceEnvironment,
+    policy: SequencePolicy,
+    terminals: Tokens,
+    *,
+    generator: torch.Generator | None = None,
+    device: torch.device | str = "cpu",
+) -> Replayed:
+    """Score externally supplied sequences, saying which ones could be scored.
+
+    The form to use when the caller has per-terminal data to keep aligned. See
+    `replay_trajectories` for the plain one.
+
+    Args:
+        env: The construction graph.
+        policy: The policy to score under.
+        terminals: An ``(n, length)`` array of sequences to score.
+        generator: Torch generator, for reproducible path selection.
+        device: Where to run the policy.
+
+    Returns:
+        The trajectories and the mask of terminals they correspond to.
+    """
+    return _replay(env, policy, terminals, generator=generator, device=device)
 
 
 def replay_trajectories(
@@ -58,8 +101,10 @@ def replay_trajectories(
         device: Where to run the policy.
 
     Returns:
-        Trajectories carrying ``log P_F`` and ``log P_B`` for the supplied
-        terminals, with gradients.
+        Trajectories carrying ``log P_F`` and ``log P_B`` with gradients, one
+        per terminal that could be constructed. This is shorter than
+        ``terminals`` when the environment masks, so a caller pairing it with
+        per-terminal data of its own wants `replay` instead.
 
     Raises:
         ValueError: If ``terminals`` is not a batch of the right width, or a
@@ -67,6 +112,18 @@ def replay_trajectories(
             means it is not in the space the policy is defined over, and
             training on it would be meaningless rather than merely wrong.
     """
+    return _replay(env, policy, terminals, generator=generator, device=device).trajectories
+
+
+def _replay(
+    env: SequenceEnvironment,
+    policy: SequencePolicy,
+    terminals: Tokens,
+    *,
+    generator: torch.Generator | None,
+    device: torch.device | str,
+) -> Replayed:
+    """Do the work both public forms share."""
     sequences = np.asarray(terminals)
     if sequences.ndim != 2 or sequences.shape[1] != env.sequence_length:  # noqa: PLR2004
         raise ValueError(f"expected shape (n, {env.sequence_length}), got {tuple(sequences.shape)}")
@@ -79,15 +136,26 @@ def replay_trajectories(
 
     if sequences.shape[0] == 0:
         empty = torch.zeros(0, device=device)
-        return Trajectories(
-            terminal=sequences,
-            log_forward=empty,
-            log_backward=empty,
-            lengths=np.zeros(0, dtype=np.int64),
+        return Replayed(
+            Trajectories(
+                terminal=sequences,
+                log_forward=empty,
+                log_backward=empty,
+                lengths=np.zeros(0, dtype=np.int64),
+            ),
+            np.ones(0, dtype=np.bool_),
         )
 
-    paths = _backward_paths(env, policy, sequences, generator, device)
-    return _score_forward(env, policy, sequences, paths, device)
+    paths, constructed = _backward_paths(env, policy, sequences, generator, device)
+    # Dropped rather than raised: breeding a design the policy cannot construct
+    # is a legitimate thing for a genetic algorithm to do, and the sequences
+    # that survive are still valid training signal. Dropped rather than scored:
+    # a truncated path replayed forward from the source is a different
+    # trajectory than the one drawn, ending somewhere the terminal is not.
+    if not constructed.all():
+        sequences = sequences[constructed]
+        paths = [path for path, keep in zip(paths, constructed, strict=True) if keep]
+    return Replayed(_score_forward(env, policy, sequences, paths, device), constructed)
 
 
 def _backward_paths(
@@ -96,12 +164,28 @@ def _backward_paths(
     terminals: Tokens,
     generator: torch.Generator | None,
     device: torch.device | str,
-) -> list[list[int]]:
+) -> tuple[list[list[int]], npt.NDArray[np.bool_]]:
     """Draw one path per terminal by walking backward under ``P_B``.
 
+    A walk can run out of moves before it reaches the source. `is_reachable`
+    admits any sequence that is feasible and inside the mutation budget, but
+    being feasible is not the same as being *constructible*: reaching a design
+    requires every intermediate along some ordering of its mutations to be
+    feasible too, and on a constrained landscape part of the feasible set is
+    only approachable through states the environment forbids. A terminal in
+    that part has no backward path at all, and the walk parks partway with
+    mutations still applied.
+
+    Such a row is reported rather than returned as though it were complete. Its
+    truncated path is not a path to the terminal -- replayed forward from the
+    source it ends at a different sequence, and lands on a masked action often
+    enough to raise.
+
     Returns:
-        For each terminal, the actions in forward order, ending with the stop
-        action.
+        For each terminal, the actions in forward order ending with the stop
+        action; and a mask saying which walks reached the source, so the caller
+        can drop the rest. Rows where the mask is false carry a partial path
+        that must not be scored.
     """
     n = terminals.shape[0]
     state = State(sequences=terminals.copy(), stopped=np.ones(n, dtype=np.bool_))
@@ -133,7 +217,12 @@ def _backward_paths(
             reversed_paths[row].append(int(actions[row]))
         state = _backward_step_active(env, state, actions.cpu().numpy(), active)
 
-    return [list(reversed(path)) for path in reversed_paths]
+    # The source is where a complete walk stops, and it is also where an
+    # exhausted one stops, so the two are told apart by where the state ended
+    # up rather than by why the loop left it.
+    source = env.initial(n).sequences
+    constructed = np.all(state.sequences == source, axis=1)
+    return [list(reversed(path)) for path in reversed_paths], constructed
 
 
 def _backward_step_active(
