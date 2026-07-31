@@ -179,7 +179,41 @@ def _at_optimum(records: Mapping[int, RunRecord], attainable: AttainableOptimum 
     return float(np.mean(usable >= attainable.lower - SOLVED_TOLERANCE))
 
 
-def report(store: ResultStore, tier: Tier, reference: str = "genetic+proxy") -> str:
+#: What each tier's arms are compared against. A tier that does not contain the
+#: default reference gets its own, because `report` skips the paired section
+#: silently when the reference is absent -- which reads as "nothing separated
+#: these arms" when what happened is that nothing was tested.
+REFERENCES = {
+    # The shipped configuration, so each swept value is read as a change from
+    # what the headline rows were produced at.
+    "sensitivity": "steps-300",
+    # Trajectory balance, the objective the others are alternatives to.
+    "objectives": "gfn-tb",
+}
+
+#: The strongest control: a genetic algorithm with the same proxy access the
+#: GFlowNet gets. Comparing against a method that only meets the model as a
+#: filter would not be a comparison of methods.
+DEFAULT_REFERENCE = "genetic+proxy"
+
+
+def reference_for(tier: Tier, methods: dict[str, object]) -> str | None:
+    """Which arm a tier's comparisons are drawn against.
+
+    Args:
+        tier: The tier being reported on.
+        methods: The arms it runs, so an absent reference is caught here rather
+            than becoming a missing section further down.
+
+    Returns:
+        The reference arm's name, or ``None`` when the tier has no arm to serve
+        as one -- said explicitly so the report can name the omission.
+    """
+    chosen = REFERENCES.get(tier.name, DEFAULT_REFERENCE)
+    return chosen if chosen in methods else None
+
+
+def report(store: ResultStore, tier: Tier, reference: str | None = None) -> str:
     """Read the store and compare every arm against one, paired across seeds.
 
     Regret is read straight from the records, where it is already against the
@@ -191,14 +225,17 @@ def report(store: ResultStore, tier: Tier, reference: str = "genetic+proxy") -> 
     Args:
         store: Where results live.
         tier: The tier to report on.
-        reference: Arm to compare against. Defaults to the strongest control --
-            a genetic algorithm with the same proxy access the GFlowNet gets.
+        reference: Arm to compare against. Defaults to whatever
+            `reference_for` picks for this tier. ``None`` where the tier has no
+            arm that can serve, which is reported rather than passed over.
 
     Returns:
         A multi-line report.
     """
     lines = []
     names = list(methods_for(tier))
+    if reference is None:
+        reference = reference_for(tier, methods_for(tier))
     for task in tier.tasks:
         attainable = attainable_for(task)
         lines.append(f"\n{task!r}")
@@ -231,30 +268,58 @@ def report(store: ResultStore, tier: Tier, reference: str = "genetic+proxy") -> 
                 f"comparison naming it is not a comparison of methods"
             )
 
-        base = held.get(reference)
-        if not base or not seeds:
-            continue
-        lines.append(f"  paired vs {reference} (positive favours the first):")
-        for name in names:
-            if name == reference or not held[name]:
-                continue
-            mine = records_to_metric(held[name], seeds, "regret")
-            theirs = records_to_metric(base, seeds, "regret")
-            if len(mine) != len(theirs) or len(mine) < 2:  # noqa: PLR2004
-                continue
-            outcome = compare(name, mine, theirs, higher_is_better=False)
-            lines.append(f"    {outcome!r}")
-            # Said before the p-value is read rather than after: an arm on the
-            # ceiling makes the difference a measurement of the ceiling, and
-            # significance there is significance about the task.
-            if vacuous := solved.intersection({name, reference}):
-                lines.append(
-                    f"        vacuous: {', '.join(sorted(vacuous))} already reached "
-                    f"everything this task was audited to contain"
-                )
-            elif not outcome.significant and (needed := seeds_needed(outcome)):
-                lines.append(f"        inconclusive; ~{needed} seeds would resolve this")
+        lines.extend(_paired(held, names, seeds, reference, solved))
     return "\n".join(lines)
+
+
+def _paired(
+    held: Mapping[str, Mapping[int, RunRecord]],
+    names: list[str],
+    seeds: list[int],
+    reference: str | None,
+    solved: set[str],
+) -> list[str]:
+    """Compare every arm against the reference, paired across shared seeds.
+
+    Args:
+        held: Stored records by arm.
+        names: The arms, in report order.
+        seeds: Seeds every arm has, so the comparison is genuinely paired.
+        reference: The arm to compare against, or ``None`` if the tier has none.
+        solved: Arms already sitting on the attainable optimum.
+
+    Returns:
+        Report lines, including a line naming the omission when there is
+        nothing to compare against -- an absent section reads as "nothing
+        separated these arms", which is a different statement from "nothing
+        was tested".
+    """
+    if reference is None:
+        return ["  no reference arm in this tier, so nothing is paired"]
+    base = held.get(reference)
+    if not base or not seeds:
+        return [f"  reference {reference} has no usable seeds here, so nothing is paired"]
+    lines = [f"  paired vs {reference} (positive favours the first):"]
+    for name in names:
+        if name == reference or not held[name]:
+            continue
+        mine = records_to_metric(held[name], seeds, "regret")
+        theirs = records_to_metric(base, seeds, "regret")
+        if len(mine) != len(theirs) or len(mine) < 2:  # noqa: PLR2004
+            continue
+        outcome = compare(name, mine, theirs, higher_is_better=False)
+        lines.append(f"    {outcome!r}")
+        # Said before the p-value is read rather than after: an arm on the
+        # ceiling makes the difference a measurement of the ceiling, and
+        # significance there is significance about the task.
+        if vacuous := solved.intersection({name, reference}):
+            lines.append(
+                f"        vacuous: {', '.join(sorted(vacuous))} already reached "
+                f"everything this task was audited to contain"
+            )
+        elif not outcome.significant and (needed := seeds_needed(outcome)):
+            lines.append(f"        inconclusive; ~{needed} seeds would resolve this")
+    return lines
 
 
 def main(argv: list[str] | None = None) -> int:
