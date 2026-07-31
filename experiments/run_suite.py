@@ -46,6 +46,7 @@ from evogfn.benchmark.statistics import compare, seeds_needed
 from evogfn.benchmark.store import ResultStore
 from evogfn.benchmark.suite import (
     MAIN,
+    Purpose,
     Tier,
     budget_gradient,
     objective_task,
@@ -95,16 +96,18 @@ def tiers(main_seeds: int, diagnostic_seeds: int) -> list[Tier]:
     cheap = tuple(t for t in MAIN if t.name != "large-space")
     expensive = tuple(t for t in MAIN if t.name == "large-space")
     return [
-        Tier("objectives", (objective_task(),), tuple(range(diagnostic_seeds)), headline=False),
+        Tier("objectives", (objective_task(),), tuple(range(diagnostic_seeds)), Purpose.DIAGNOSTIC),
         # Shares the objectives task deliberately: same landscape, same
         # protocol, same seeds, so a setting's effect and an objective's are
         # measured against each other rather than across two configurations.
-        Tier("sensitivity", (objective_task(),), tuple(range(diagnostic_seeds)), headline=False),
-        Tier("main", cheap, tuple(range(main_seeds)), headline=True),
-        Tier("rounds-curve", rounds_curve(), tuple(range(diagnostic_seeds)), headline=False),
-        Tier("budget-gradient", budget_gradient(), tuple(range(diagnostic_seeds)), headline=False),
+        Tier("sensitivity", (objective_task(),), tuple(range(diagnostic_seeds)), Purpose.SELECTION),
+        Tier("main", cheap, tuple(range(main_seeds)), Purpose.BENCHMARK),
+        Tier("rounds-curve", rounds_curve(), tuple(range(diagnostic_seeds)), Purpose.DIAGNOSTIC),
+        Tier(
+            "budget-gradient", budget_gradient(), tuple(range(diagnostic_seeds)), Purpose.DIAGNOSTIC
+        ),
         # Last: ~200s a campaign at L=256, and fewer seeds for the same reason.
-        Tier("large-space", expensive, tuple(range(LARGE_SPACE_SEEDS)), headline=True),
+        Tier("large-space", expensive, tuple(range(LARGE_SPACE_SEEDS)), Purpose.BENCHMARK),
     ]
 
 
@@ -359,7 +362,7 @@ def main(argv: list[str] | None = None) -> int:
                 t.name,
                 tuple(task for task in t.tasks if task.name in wanted),
                 t.seeds,
-                t.headline,
+                t.purpose,
             )
             for t in selected
         ]

@@ -279,7 +279,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.task:
         wanted = set(args.task)
         selected = [
-            Tier(t.name, tuple(k for k in t.tasks if k.name in wanted), t.seeds, t.headline)
+            Tier(t.name, tuple(k for k in t.tasks if k.name in wanted), t.seeds, t.purpose)
             for t in selected
         ]
         selected = [t for t in selected if t.tasks]
