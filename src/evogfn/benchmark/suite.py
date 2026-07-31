@@ -92,6 +92,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, replace
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -444,6 +445,32 @@ def objective_task() -> Task:
     )
 
 
+class Purpose(StrEnum):
+    """What a tier's results are for, which decides how they may be used.
+
+    A single "is this the headline" flag cannot express this, because the two
+    kinds of non-headline tier differ in a way that matters to a reader rather
+    than only to us. A diagnostic measures how methods behave; a selection tier
+    measures nothing, it *chooses our own configuration*, and a choice made on a
+    landscape a claim is later drawn from is tuning on the test set. Keeping the
+    distinction in the type means a tier cannot quietly drift from one role to
+    the other, and the results table can refuse a tier that was never eligible
+    to appear in it.
+    """
+
+    #: Compares methods at equal budget. These rows carry the claims.
+    BENCHMARK = "benchmark"
+
+    #: Explains behaviour -- response curves, ablations, objective comparisons.
+    #: Informs the discussion; never a row in the results table.
+    DIAGNOSTIC = "diagnostic"
+
+    #: Fixes our own hyperparameters before the benchmark runs. Must sit on a
+    #: landscape no benchmark task uses, and must be reported as a method
+    #: detail rather than as a finding.
+    SELECTION = "selection"
+
+
 @dataclass(frozen=True, slots=True)
 class Tier:
     """A group of tasks run at one seed count, with a reason to exist.
@@ -452,18 +479,26 @@ class Tier:
         name: Short identifier.
         tasks: What to run.
         seeds: Seeds per arm.
-        headline: Whether results here carry claims or only inform choices.
+        purpose: What the results may be used for. See `Purpose`.
     """
 
     name: str
     tasks: tuple[Task, ...]
     seeds: tuple[int, ...]
-    headline: bool
+    purpose: Purpose
+
+    @property
+    def headline(self) -> bool:
+        """Whether these results carry claims.
+
+        Kept because callers ask this question far more often than they ask
+        which of the two non-headline roles a tier plays.
+        """
+        return self.purpose is Purpose.BENCHMARK
 
     def __repr__(self) -> str:
         """Name the tier, its size and its standing."""
-        kind = "main" if self.headline else "diagnostic"
-        return f"{self.name} ({kind}, {len(self.tasks)} tasks x {len(self.seeds)} seeds)"
+        return f"{self.name} ({self.purpose}, {len(self.tasks)} tasks x {len(self.seeds)} seeds)"
 
 
 def _scores(

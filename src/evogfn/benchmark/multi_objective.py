@@ -18,19 +18,25 @@ something about a real assay and something about a controlled one:
 * `ch65-real` -- three antibody affinities actually measured by Tite-Seq, on the
   16-site somatic-mutation lattice of CH65. The trade-off here is not a
   construction; the paper it comes from is *about* breadth costing potency.
-* `mo-ehrlich-hard` -- two Ehrlich objectives at maximum conflict, on Ehrlich
-  parameters **identical** to `protocol-alde`'s single-objective landscape
-  (L=64, v=20, c=2, k=4, density 0.5, seed 2). That is the point of it: the two
-  tasks differ in objective count and in nothing else, so "what does adding an
-  objective cost?" has a paired answer instead of an anecdote. Those parameters
-  are not free to drift.
+* `mo-ehrlich-hard` -- two Ehrlich objectives at maximum conflict, at L=10, v=4,
+  c=2, k=5, density 0.5, seed 2. The alphabet is what that task is for: four
+  letters is DNA/RNA, and it makes $4^{10}$ = 1,048,576 sequences enumerable, so
+  the reference front IGD+ measures coverage of is the **true** one. The earlier
+  version of this task mirrored `protocol-alde`'s parameters exactly (L=64,
+  v=20, c=2, k=4) to make "what does adding an objective cost?" a paired
+  question, and that pairing is gone: a 20-letter alphabet is enumerable only to
+  L=5, so the price of the pairing was a two-point substitute front. See
+  [MO_VOCAB_SIZE][evogfn.benchmark.multi_objective.MO_VOCAB_SIZE] and the
+  constants below it for every alignment that moved and what it bought.
 
 **Explanatory sweeps** answer "under what conditions does the ranking change".
 They vary conflict at fixed objective count, and objective count at fixed
-conflict, on the cheap L=32 instance the single-objective diagnostics use. They
-are *not* inputs to the main table -- a method that wins at conflict 0.25 and
-loses at 1.0 has not won anything, and the sweep is how that gets said rather
-than a source of extra headline rows.
+conflict, on the same instance family at a different seed. They are *not* inputs
+to the main table -- a method that wins at low conflict and loses at 1.0 has not
+won anything, and the sweep is how that gets said rather than a source of extra
+headline rows. The conflict rungs sit on a measured transition rather than on
+round numbers; see
+[CONFLICT_SWEEP][evogfn.benchmark.multi_objective.CONFLICT_SWEEP].
 
 **The one diagnostic that decides something** is `mo-preferences`. A scalarised
 method searches wherever its preference $\omega$ points, so comparing one
@@ -55,16 +61,21 @@ than defaulted:
   nothing. Each task carries its own explicitly instead of relying on the
   landscape to expose one, so a landscape growing or losing a `reference_point`
   property cannot silently move a published number.
-* **The reference front** is what IGD+ measures coverage of, and the two tasks
-  can supply very different qualities of it. See `EXACT_FRONT_LIMIT` below.
+* **The reference front** is what IGD+ measures coverage of, and every task here
+  now supplies the exact one: CH65's by sweeping its measured library, the
+  Ehrlich tasks' by enumerating their $4^{10}$ space. `front_is_exact` is
+  therefore `True` throughout, which it was not -- the Ehrlich tasks used to
+  carry a constructed subset, and `mo-ehrlich-hard`'s ran to two points.
 
-Hypervolume is **not always computable here, and that is reported rather than
-patched.** [evogfn.metrics.pareto][] is exact in every dimension it accepts and
-raises past 16 front points in three or more objectives. Measured on CH65: a
-random 384-design draw has a front of 2--9 points and computes fine, while the
-384 designs a method actually converges on have a front of up to 19 and do not.
-So on `ch65-real` the arms most likely to lose their hypervolume are the good
-ones, which is exactly the wrong direction for a headline metric -- and is why
+Hypervolume is **computable here only if the optional `moo` extra is
+installed**, and where it is not that is reported rather than patched.
+[evogfn.metrics.pareto][] is exact in every dimension it accepts; its built-in
+method stops at 16 front points in three or more objectives, and pymoo takes
+over past that when it is available. The limit is reached in practice, and by
+the wrong runs: on CH65 a random 384-design draw has a front of 2--9 points and
+computes either way, while the 384 designs a method actually converges on have a
+front of up to 19. `mo-objectives-4`'s exact front alone is 23 points. So a
+core-only install loses the hypervolume of the arms that did best -- which is why
 `ch65-real` also carries an exact reference front and is read on IGD+. A `nan`
 in that column is "not computed", never "no volume".
 
@@ -133,7 +144,7 @@ from evogfn.algorithms.gflownet.training import TrainingConfig
 from evogfn.algorithms.inner_loop import ProxyOptimising
 from evogfn.benchmark.determinism import is_deterministic
 from evogfn.benchmark.protocol import PLATE, Protocol
-from evogfn.benchmark.suite import ALDE_MUTATIONS, DIAGNOSTIC_MUTATIONS, Tier
+from evogfn.benchmark.suite import DIAGNOSTIC_MUTATIONS, Purpose, Tier
 from evogfn.benchmark.tasks import Task
 from evogfn.env.mutation import MutationEnvironment
 from evogfn.landscapes.ch65 import CH65_DETECTION_FLOOR, CH65_N_SITES, CH65Landscape
@@ -172,20 +183,65 @@ MultiObjectiveMethodology = Callable[["Task", int], "Campaign | PreferenceEnsemb
 #: towards -- the same geometry as ``gb1-anchor`` in the single-objective suite.
 CH65_MUTATIONS = CH65_N_SITES
 
-#: Per-round radius on `mo-ehrlich-hard`, taken from `protocol-alde` rather than
-#: chosen. That task's audit measured 21 to be where a re-anchored chain pins the
-#: planted optimum at L=64; the multi-objective instance is the same landscape
-#: parameters with a second objective bolted on, so borrowing the constant is
-#: what keeps the two comparable rather than merely similar.
-MO_EHRLICH_MUTATIONS = ALDE_MUTATIONS
+#: Alphabet size on every multi-Ehrlich task. Four, and it was measurement that
+#: forced it rather than taste. These tasks are read on IGD+ against a reference
+#: front, and a reference front is only worth the word if it is the *exact* one --
+#: which means enumerating the space. At the 20-letter alphabet the
+#: single-objective suite uses, $20^L$ clears
+#: [MAX_ENUMERABLE_SIZE][evogfn.landscapes.base.MAX_ENUMERABLE_SIZE] at $L = 6$,
+#: so **no** Ehrlich task here was enumerable and every one of them fell back to
+#: a constructed front. `mo-ehrlich-hard`'s had two points: a coverage indicator
+#: with two things to cover.
+#:
+#: Four letters is DNA/RNA rather than a toy -- aptamer and ribozyme selection are
+#: directed evolution over exactly this alphabet -- and $4^{10} = 1{,}048{,}576$
+#: is a fifth of the enumeration guard, so the front becomes a fact instead of a
+#: construction.
+MO_VOCAB_SIZE = 4
 
-#: Sequence length on the hard task. L=64 is where the published field degrades,
-#: and it is `protocol-alde`'s length.
-MO_HARD_LENGTH = 64
+#: Sequence length on every multi-Ehrlich task, hard and diagnostic alike.
+#:
+#: Ten is the largest length at which the space is enumerable *and* two Ehrlich
+#: motifs still fit: $4^{11} = 4.2$M is also inside the guard but costs six times
+#: the enumeration for measurably **smaller** fronts (4 points at maximum
+#: conflict against 5, seed 2), and $4^{12}$ is past it.
+#:
+#: The single-objective suite's two lengths -- 64 for the protocol tasks, 32 for
+#: the diagnostics -- cannot survive that, so `mo-ehrlich-hard` and the sweeps now
+#: run at one length and differ by instance seed and conflict alone. That is a
+#: real loss and is recorded here rather than in a changelog: "hard" no longer
+#: means "longer", it means "the seed the protocol tasks use, at maximum
+#: conflict".
+MO_LENGTH = 10
 
-#: Sequence length for the explanatory sweeps, matching the single-objective
-#: diagnostics so a conflict curve and a budget curve are read at the same scale.
-MO_DIAGNOSTIC_LENGTH = 32
+#: Tokens per motif, $k$. Five rather than the single-objective suite's four,
+#: and this is the alignment the exact front cost most. An Ehrlich value is
+#: quantised to $q = k$ levels per motif, so $k$ is what bounds how many distinct
+#: objective vectors a front can even contain: at $k = 4$ the exact front at
+#: maximum conflict measured **one to two points**, which is no better than the
+#: constructed front it replaces. At $k = 5$ it measures 3 to 5 at two
+#: objectives, 9 to 12 at three and 23 to 25 at four.
+MO_MOTIF_LENGTH = 5
+
+#: Largest gap between consecutive motif positions. One -- contiguous motifs --
+#: rather than the single-objective suite's three, and it is arithmetic rather
+#: than a choice: a motif spans $(k - 1) s + 1$ positions and must fit inside a
+#: block of $L / c = 5$, so $k = 5$ leaves no room for spacing at all. Keeping
+#: $s = 3$ would have meant $k = 2$, and a two-level objective.
+MO_MAX_SPACING = 1
+
+#: Per-round radius on every multi-Ehrlich task. `protocol-alde`'s audited 21 is
+#: meaningless at $L = 10$ -- a radius wider than the sequence is no radius -- so
+#: the diagnostics' 4 is what carries over, and with re-anchoring four rounds of
+#: it reach further than the sequence is long.
+#:
+#: What this costs is worth stating plainly: 4 substitutions of the shared chain
+#: reach **493** constructible designs, out of 8,616 feasible sequences in the
+#: whole space. A four-plate protocol spends 384 assays against that, so these
+#: tasks now sit in a far more saturated regime than their single-objective
+#: counterparts, where the reachable set is astronomical. They measure how well a
+#: method covers a front, not whether it can find one at all.
+MO_EHRLICH_MUTATIONS = DIAGNOSTIC_MUTATIONS
 
 #: Ehrlich instance seed shared with `protocol-alde` and `protocol-evolvepro`.
 MO_HARD_SEED = 2
@@ -193,11 +249,29 @@ MO_HARD_SEED = 2
 #: Ehrlich instance seed shared with the single-objective diagnostics.
 MO_DIAGNOSTIC_SEED = 7
 
-#: Conflict values swept in the explanatory tier. Zero collapses the exact front
-#: to a single point by construction, one draws every objective's optimum
-#: independently, and the interesting question is whether a ranking measured at
-#: one end survives to the other.
-CONFLICT_SWEEP: tuple[float, ...] = (0.0, 0.25, 0.5, 0.75, 1.0)
+#: Conflict values swept in the explanatory tier, chosen from a scan rather than
+#: from the round numbers. The dial is not a smooth knob on front size: it
+#: redraws each objective's planted optimum and its motif placement, so the
+#: instance changes wholesale at every rung and the front size is noisy in
+#: conflict. What the scan is for is locating the *transition*, and the exact
+#: front over the whole $4^{10}$ space at these settings gives it:
+#:
+#: | conflict | 0.0 | 0.1 | 0.2 | 0.3 | 0.4 | 0.5 | 0.6 | 0.7 | 0.8 | 0.9 | 1.0 |
+#: | -------- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+#: | seed 7 (swept) | 1 | 2 | 1 | 1 | 1 | 1 | 3 | 2 | 3 | 2 | 3 |
+#: | seed 2 (hard)  | 1 | 1 | 1 | 1 | 2 | 3 | 2 | 3 | 3 | 3 | 5 |
+#:
+#: The old rungs `(0.0, 0.25, 0.5, 0.75, 1.0)` were round numbers rather than
+#: measurements, and at the old settings 0.0 and 0.25 gave the *same* one-point
+#: front -- two of five rungs measuring no trade-off at all. On this instance
+#: they land no better: `1, 1, 1, 3, 3`, three rungs below the transition and a
+#: gap of 0.25 across it. These five give `1, 1, 3, 3, 3`. They keep 0.0 as the
+#: control, where a single-point front is provable from the construction rather
+#: than merely observed, and put 0.4 and 0.6 either side of where the front
+#: starts to spread -- on the swept seed it moves between exactly those two, and
+#: on seed 2 it has already moved by 0.4. The transition is then visible in the
+#: sweep's own front sizes instead of being asserted here.
+CONFLICT_SWEEP: tuple[float, ...] = (0.0, 0.4, 0.6, 0.8, 1.0)
 
 #: Objective counts swept in the explanatory tier. Two is the same instance as
 #: `mo-conflict-1.00`, deliberately: running both is a free reproducibility check
@@ -227,11 +301,17 @@ CH65_REFERENCE_POINT: tuple[float, ...] = (
 )
 
 #: Front points [hypervolume][evogfn.metrics.pareto.hypervolume] accepts in three
-#: or more objectives before its exact inclusion--exclusion becomes intractable.
-#: Restated here because it is a property of this suite's headline metric and not
-#: an implementation detail of the metric: on `ch65-real` a converged arm exceeds
-#: it and a random one does not, so the column goes missing for the arms that did
-#: best. Read `ch65-real` on IGD+.
+#: or more objectives **without** the optional `moo` extra, before its built-in
+#: inclusion--exclusion becomes intractable. Restated here because it decides
+#: whether this suite has a hypervolume column at all: on `ch65-real` a converged
+#: arm produces a 19-point front and a random one 2--9, and on `mo-objectives-4`
+#: the exact front alone runs to 25 points -- so a core-only install loses the
+#: number for precisely the arms that did best.
+#:
+#: With the extra installed the limit does not apply and nothing here records
+#: `nan`. Without it, read those tasks on IGD+.
+#: [pymoo_available][evogfn.metrics.pareto.pymoo_available] says which install
+#: is running.
 EXACT_FRONT_LIMIT = 16
 
 #: Where a multi-objective campaign's code actually starts, for staleness. The
@@ -331,19 +411,76 @@ def ch65_reference_front(landscape: FitnessLandscape) -> npt.NDArray[np.float64]
     return np.asarray(np.unique(front, axis=0), dtype=np.float64)
 
 
+def enumerated_front(landscape: FitnessLandscape) -> npt.NDArray[np.float64]:
+    r"""The true Pareto front of a multi-Ehrlich instance, by enumerating the space.
+
+    What every Ehrlich task in this suite is now scored against, and the reason
+    [MO_VOCAB_SIZE][evogfn.benchmark.multi_objective.MO_VOCAB_SIZE] is 4. A
+    coverage indicator is only as strong as what it measures coverage *of*:
+    against a constructed subset, IGD+ = 0 means "covered everything one
+    particular construction found", while against the enumerated front it means
+    covered the front. Only the second reading is a claim.
+
+    $4^{10} = 1{,}048{,}576$ sequences, scored in about 1.5 seconds and cached by
+    [MultiObjectiveTask.reference_front][evogfn.benchmark.multi_objective.MultiObjectiveTask.reference_front],
+    so a fifty-seed arm pays for it once. Measured front sizes at maximum
+    conflict: 3--5 points at two objectives, 9--12 at three, 23--25 at four --
+    against the **two** points
+    [recombination_front][evogfn.benchmark.multi_objective.recombination_front]
+    produced for `mo-ehrlich-hard` at the old settings.
+
+    Note that the front over the whole space is generally *not* attainable under
+    a mutation budget: at 4 substitutions from the campaign's parent only 493
+    designs are reachable, and their front is a subset. That is the honest target
+    -- an arm that cannot reach a front point should be charged for it -- but it
+    does mean IGD+ = 0 is not expected here, where against the constructed front
+    it was.
+
+    Args:
+        landscape: The multi-Ehrlich landscape.
+
+    Returns:
+        An `(m, n_objectives)` array of the distinct non-dominated objective
+        vectors over the whole space.
+
+    Raises:
+        TypeError: If handed a landscape that is not a multi-Ehrlich instance.
+        ValueError: If the space is larger than
+            [MAX_ENUMERABLE_SIZE][evogfn.landscapes.base.MAX_ENUMERABLE_SIZE],
+            which is the guard that makes "exact" affordable rather than a
+            promise the machine cannot keep.
+    """
+    if not isinstance(landscape, MultiEhrlichLandscape):
+        raise TypeError(
+            f"a {type(landscape).__name__} is not enumerated for its front here; only a "
+            f"multi-Ehrlich instance is small enough, and CH65 has its own routine "
+            f"because its front turns on which variants the assay resolved"
+        )
+    return landscape.exact_pareto_front()
+
+
 def recombination_front(landscape: FitnessLandscape) -> npt.NDArray[np.float64]:
     r"""An attainable front for a multi-Ehrlich instance, built rather than enumerated.
 
-    ## Why the exact front is not available here
+    ## What this is for now
+
+    Nothing in this suite: every task here moved to
+    [enumerated_front][evogfn.benchmark.multi_objective.enumerated_front] when
+    the alphabet dropped to 4 and the space became enumerable. It is kept because
+    the problem it solves has not gone away -- a multi-Ehrlich instance at the
+    20-letter alphabet, or at any length past
+    [MO_LENGTH][evogfn.benchmark.multi_objective.MO_LENGTH], has no enumerable
+    space and still needs something for IGD+ to measure against.
+
+    ## Why the exact front was not available at those settings
 
     [exact_pareto_front][evogfn.landscapes.multi_ehrlich.MultiEhrlichLandscape.exact_pareto_front]
-    enumerates the whole space, and the whole space at these settings is
+    enumerates the whole space, and the whole space at $v = 20$, $L = 32$ is
     $20^{32}$ -- twenty-five orders of magnitude past
-    [MAX_ENUMERABLE_SIZE][evogfn.landscapes.base.MAX_ENUMERABLE_SIZE]. It is not
-    a matter of patience: no instance in this suite is enumerable, because a
-    20-letter alphabet is enumerable only up to $L = 5$. So "IGD+ against the
-    exact front" is unavailable on every Ehrlich task here, and something has to
-    take its place *visibly*.
+    [MAX_ENUMERABLE_SIZE][evogfn.landscapes.base.MAX_ENUMERABLE_SIZE]. It was not
+    a matter of patience: a 20-letter alphabet is enumerable only up to $L = 5$,
+    so *no* instance in this suite was enumerable and something had to take the
+    exact front's place visibly.
 
     ## What this is instead
 
@@ -377,18 +514,16 @@ def recombination_front(landscape: FitnessLandscape) -> npt.NDArray[np.float64]:
       saturating it is a larger candidate set, not a claim.
 
     How thick the answer is varies sharply with the instance, and thin is not
-    wrong but is coarse: `mo-ehrlich-hard` at L=64 yields **two** points,
-    `(0.375, 1.0)` and `(1.0, 0.5)`, so IGD+ there is essentially "did you find
-    both ends of the trade-off". The L=32 sweeps yield 1 to 22.
+    wrong but is coarse -- and it was the measured thinness that retired this
+    from the suite. At the old settings `mo-ehrlich-hard` (v=20, L=64) yielded
+    **two** points, `(0.375, 1.0)` and `(1.0, 0.5)`, so IGD+ there was
+    essentially "did you find both ends of the trade-off"; the L=32 sweeps
+    yielded 1 to 22.
 
     At `conflict = 0` every planted optimum is the same sequence, so the set
     collapses to one point and the front is `[[1, ..., 1]]` -- which is what the
     landscape's own documentation says the exact front is in that regime, and is
     the one setting where this construction and the truth provably coincide.
-    Measured, the collapse survives to `conflict = 0.25` as well: a quarter of
-    the sequence being contested is not yet enough to stop one design satisfying
-    both objectives' motifs, which is worth knowing before reading the low end of
-    the conflict sweep as a trade-off at all.
 
     Args:
         landscape: The multi-Ehrlich landscape.
@@ -616,19 +751,26 @@ def _task(  # noqa: PLR0913 - a task is defined by what it declares
 
 def _multi_ehrlich(
     *,
-    sequence_length: int,
     n_objectives: int,
     conflict: float,
     seed: int,
 ) -> Callable[[], FitnessLandscape]:
-    """A factory for a multi-Ehrlich instance at fixed motif parameters.
+    """A factory for a multi-Ehrlich instance at the suite's fixed motif parameters.
 
-    Everything but length, objective count, conflict and seed is held at the
-    values `protocol-alde` uses, so a task built here differs from that
-    single-objective task in the axis being varied and in nothing else.
+    Only the objective count, the conflict and the seed vary, so any two tasks
+    built here differ in the axis being swept and in nothing else. What does *not*
+    vary is stated as constants above, each with the alignment it keeps or breaks
+    against the single-objective suite: `c = 2` motifs and a density of 0.5 carry
+    over unchanged, while
+    [MO_VOCAB_SIZE][evogfn.benchmark.multi_objective.MO_VOCAB_SIZE],
+    [MO_LENGTH][evogfn.benchmark.multi_objective.MO_LENGTH],
+    [MO_MOTIF_LENGTH][evogfn.benchmark.multi_objective.MO_MOTIF_LENGTH] and
+    [MO_MAX_SPACING][evogfn.benchmark.multi_objective.MO_MAX_SPACING] were all
+    moved to buy an enumerable space -- so "what does adding an objective cost?"
+    is no longer a paired question against `protocol-alde` and must be read as a
+    comparison within this suite.
 
     Args:
-        sequence_length: Length $L$.
         n_objectives: How many Ehrlich functions to compose.
         conflict: How far the objectives' planted optima are allowed to disagree.
         seed: Seeds the transition matrix, the base sequence and the divergence.
@@ -639,11 +781,12 @@ def _multi_ehrlich(
 
     def build() -> FitnessLandscape:
         return MultiEhrlichLandscape.with_conflict(
-            sequence_length=sequence_length,
-            vocab_size=20,
+            sequence_length=MO_LENGTH,
+            vocab_size=MO_VOCAB_SIZE,
             n_objectives=n_objectives,
             n_motifs=2,
-            motif_length=4,
+            motif_length=MO_MOTIF_LENGTH,
+            max_spacing=MO_MAX_SPACING,
             transition_density=0.5,
             conflict=conflict,
             seed=seed,
@@ -677,14 +820,13 @@ MULTI_OBJECTIVE_MAIN: tuple[MultiObjectiveTask, ...] = (
     ),
     _task(
         "mo-ehrlich-hard",
-        "What does a second objective cost? The Ehrlich parameters are "
-        "protocol-alde's exactly -- L=64, v=20, c=2, k=4, density 0.5, seed 2 -- "
-        "with a second objective at maximum conflict and nothing else changed, "
-        "so the pair of tasks isolates objective count. The per-round radius is "
-        "protocol-alde's audited 21 and the campaign re-anchors, so its reach is "
-        "cumulative.",
+        "How well is a whole front covered when the objectives fight? Two "
+        "Ehrlich objectives at maximum conflict on a DNA-sized alphabet -- "
+        "L=10, v=4, c=2, k=5, density 0.5, seed 2 -- where the 1,048,576-sequence "
+        "space is enumerable and the reference front is therefore the true one "
+        "rather than a construction. The per-round radius is 4 and the campaign "
+        "re-anchors, so its reach is cumulative.",
         _multi_ehrlich(
-            sequence_length=MO_HARD_LENGTH,
             n_objectives=2,
             conflict=1.0,
             seed=MO_HARD_SEED,
@@ -694,10 +836,11 @@ MULTI_OBJECTIVE_MAIN: tuple[MultiObjectiveTask, ...] = (
         ),
         reanchor=True,
         reference_point=(EHRLICH_REFERENCE, EHRLICH_REFERENCE),
-        front=recombination_front,
-        # Constructed, not enumerated: 20^64 is not a space anything walks. See
-        # `recombination_front` for what the substitute is and what it costs.
-        front_is_exact=False,
+        front=enumerated_front,
+        # Enumerated, not constructed: 4^10 is a fifth of the enumeration guard,
+        # so IGD+ here measures coverage of the front rather than of a candidate
+        # pool. It is 5 points at this seed, against the 2 the construction gave.
+        front_is_exact=True,
     ),
 )
 
@@ -711,18 +854,24 @@ def conflict_sweep() -> tuple[MultiObjectiveTask, ...]:
     should not beat a scalar one, while `conflict = 1` is where the trade-off is
     real. A method that wins at one end and loses at the other has not won.
 
+    The rungs are placed on a measured transition rather than on round numbers --
+    see [CONFLICT_SWEEP][evogfn.benchmark.multi_objective.CONFLICT_SWEEP] for the
+    scan and for what the old spacing got wrong. Their exact fronts run 1, 1, 3,
+    3, 3 points, so the sweep now contains the point at which a trade-off starts
+    to exist instead of straddling it invisibly.
+
     Returns:
-        One task per conflict value, on the L=32 diagnostic instance.
+        One task per conflict value.
     """
     return tuple(
         _task(
             f"mo-conflict-{conflict:.2f}",
             f"Does the ranking survive the degree of objective conflict? Two "
-            f"Ehrlich objectives at conflict {conflict:.2f} on the L=32 "
-            f"diagnostic instance. Explanatory: this decides how to read the "
-            f"main table, not what goes in it.",
+            f"Ehrlich objectives at conflict {conflict:.2f} on the L=10, v=4 "
+            f"diagnostic instance, scored against its enumerated front. "
+            f"Explanatory: this decides how to read the main table, not what "
+            f"goes in it.",
             _multi_ehrlich(
-                sequence_length=MO_DIAGNOSTIC_LENGTH,
                 n_objectives=2,
                 conflict=conflict,
                 seed=MO_DIAGNOSTIC_SEED,
@@ -730,8 +879,8 @@ def conflict_sweep() -> tuple[MultiObjectiveTask, ...]:
             Protocol(rounds=4, batch_size=PLATE, max_mutations=DIAGNOSTIC_MUTATIONS),
             reanchor=True,
             reference_point=(EHRLICH_REFERENCE, EHRLICH_REFERENCE),
-            front=recombination_front,
-            front_is_exact=False,
+            front=enumerated_front,
+            front_is_exact=True,
         )
         for conflict in CONFLICT_SWEEP
     )
@@ -741,27 +890,32 @@ def objective_count_sweep() -> tuple[MultiObjectiveTask, ...]:
     """Two, three and four objectives at maximum conflict.
 
     The other explanatory axis. Cost is expected to rise with the objective
-    count for reasons that have nothing to do with any method -- the front grows,
-    a single preference covers proportionally less of it, and above two
-    objectives the exact hypervolume stops being available past
-    `EXACT_FRONT_LIMIT` points -- so this sweep exists to separate that from
-    anything a method is doing.
+    count for reasons that have nothing to do with any method -- the exact front
+    grows from 3 points at two objectives to 9 at three and 23 at four, and a
+    single preference covers proportionally less of it -- so this sweep exists to
+    separate that from anything a method is doing.
+
+    It is also where the hypervolume column depends on the install. A 23-point
+    reference front means a converged arm's *measured* front can outgrow
+    `EXACT_FRONT_LIMIT`, and without the optional `moo` extra there is no exact
+    method for that, so `mo-objectives-4` is the task that goes `nan` first. With
+    the extra it does not.
 
     The two-objective entry is the same instance as ``mo-conflict-1.00``. Running
     both is deliberate: the two builders must produce identical numbers, and a
     divergence is a bug in one of them rather than a result.
 
     Returns:
-        One task per objective count, on the L=32 diagnostic instance.
+        One task per objective count.
     """
     return tuple(
         _task(
             f"mo-objectives-{count}",
             f"What does the objective count itself cost? {count} Ehrlich "
-            f"objectives at maximum conflict on the L=32 diagnostic instance. "
-            f"Explanatory: it says how to read the main table, not what is in it.",
+            f"objectives at maximum conflict on the L=10, v=4 diagnostic "
+            f"instance, scored against its enumerated front. Explanatory: it "
+            f"says how to read the main table, not what is in it.",
             _multi_ehrlich(
-                sequence_length=MO_DIAGNOSTIC_LENGTH,
                 n_objectives=count,
                 conflict=1.0,
                 seed=MO_DIAGNOSTIC_SEED,
@@ -769,8 +923,8 @@ def objective_count_sweep() -> tuple[MultiObjectiveTask, ...]:
             Protocol(rounds=4, batch_size=PLATE, max_mutations=DIAGNOSTIC_MUTATIONS),
             reanchor=True,
             reference_point=(EHRLICH_REFERENCE,) * count,
-            front=recombination_front,
-            front_is_exact=False,
+            front=enumerated_front,
+            front_is_exact=True,
         )
         for count in OBJECTIVE_COUNTS
     )
@@ -782,8 +936,8 @@ def preference_task() -> MultiObjectiveTask:
     Deliberately the *same* landscape and protocol as `mo-ehrlich-hard`, under a
     different name so the results land in their own file. A diagnostic that
     decides a main-table setting should be run on the thing it decides for: a
-    preference count that pays off at L=32 and not at L=64 would be a
-    recommendation drawn from the wrong instance.
+    preference count that pays off on the diagnostic instance and not on the main
+    one would be a recommendation drawn from the wrong place.
 
     Returns:
         The task.
@@ -795,7 +949,6 @@ def preference_task() -> MultiObjectiveTask:
         "between preferences instead of spent on one. This is the only "
         "diagnostic here that decides something.",
         _multi_ehrlich(
-            sequence_length=MO_HARD_LENGTH,
             n_objectives=2,
             conflict=1.0,
             seed=MO_HARD_SEED,
@@ -805,8 +958,8 @@ def preference_task() -> MultiObjectiveTask:
         ),
         reanchor=True,
         reference_point=(EHRLICH_REFERENCE, EHRLICH_REFERENCE),
-        front=recombination_front,
-        front_is_exact=False,
+        front=enumerated_front,
+        front_is_exact=True,
     )
 
 
@@ -1623,15 +1776,20 @@ def multi_objective_tiers(main_seeds: int, explanatory_seeds: int) -> list[Tier]
             "preferences",
             (preference_task(),),
             tuple(range(explanatory_seeds)),
-            headline=False,
+            purpose=Purpose.DIAGNOSTIC,
         ),
-        Tier("main", MULTI_OBJECTIVE_MAIN, tuple(range(main_seeds)), headline=True),
-        Tier("conflict", conflict_sweep(), tuple(range(explanatory_seeds)), headline=False),
+        Tier("main", MULTI_OBJECTIVE_MAIN, tuple(range(main_seeds)), purpose=Purpose.BENCHMARK),
+        Tier(
+            "conflict",
+            conflict_sweep(),
+            tuple(range(explanatory_seeds)),
+            purpose=Purpose.DIAGNOSTIC,
+        ),
         Tier(
             "objectives",
             objective_count_sweep(),
             tuple(range(explanatory_seeds)),
-            headline=False,
+            purpose=Purpose.DIAGNOSTIC,
         ),
     ]
 
@@ -1659,14 +1817,18 @@ def set_indicators(task: MultiObjectiveTask, result: CampaignResult) -> dict[str
     when the front is covered -- so ``best`` carries the volume and ``regret``
     the coverage.
 
-    Hypervolume comes back as ``nan`` where the exact method in
-    [evogfn.metrics.pareto][] cannot run, which past `EXACT_FRONT_LIMIT` front
-    points in three or more objectives it cannot. That is reported and not
-    patched: an approximation written into the same column as an exact value
-    would be indistinguishable from one, and the measurements survive on the
-    result for anyone who wants to score them with a dedicated implementation.
-    On `ch65-real` this bites precisely the arms that did best, which is why that
-    task is read on IGD+.
+    Hypervolume comes back as ``nan`` where no exact method in
+    [evogfn.metrics.pareto][] can run: past `EXACT_FRONT_LIMIT` front points in
+    three or more objectives, **without** the optional `moo` extra. With the
+    extra there is no such case and this column is always populated; install it
+    before a run rather than reading the gaps afterwards, since a `nan` cannot be
+    filled in later without re-running the campaign that produced it.
+
+    Where it does happen it is reported and not patched: an approximation written
+    into the same column as an exact value would be indistinguishable from one,
+    and the measurements survive on the result for anyone who wants to score them
+    separately. On `ch65-real` and `mo-objectives-4` this bites precisely the arms
+    that did best, which is why those tasks are read on IGD+.
 
     Args:
         task: The task being run, named in any error.
