@@ -91,7 +91,7 @@ nav:
   - Home: index.md
   - Getting started: getting-started.md
   - The benchmark suite: benchmark.md
-  - Notebooks: notebooks.md
+  - Choosing the configuration: selection.md
   - What this does not show: limitations.md
   - API reference:
       - Landscapes: reference/landscapes.md
