@@ -216,7 +216,12 @@ def run_benchmark(
                 # propagated, because one exhausted arm must not discard the
                 # seeds every other arm has already spent -- the seed is scored
                 # as spending nothing, which `underspent` then surfaces.
-                best.append(-np.inf)
+                #
+                # `nan` rather than a worst-case sentinel: the arm has no best
+                # value here, which is a different statement from having an
+                # infinitely bad one, and an infinity propagates into the
+                # spread as `inf - inf`.
+                best.append(np.nan)
                 spread.append(0.0)
                 spent.append(0)
                 continue
