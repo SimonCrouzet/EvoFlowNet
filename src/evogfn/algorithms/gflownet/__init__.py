@@ -10,6 +10,7 @@ from evogfn.algorithms.gflownet.flow_objectives import (
 from evogfn.algorithms.gflownet.genetic_gfn import (
     RANK_OFFSET,
     GeneticConfig,
+    GeneticTrainingResult,
     RankedBuffer,
     train_genetic_gfn,
 )
@@ -42,6 +43,7 @@ __all__ = [
     "GFlowNetObjective",
     "GFlowNetSampler",
     "GeneticConfig",
+    "GeneticTrainingResult",
     "RankedBuffer",
     "Replayed",
     "SubTrajectoryBalance",

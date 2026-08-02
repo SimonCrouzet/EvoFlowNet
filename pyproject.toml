@@ -36,6 +36,14 @@ dependencies = [
     "numpy>=1.26",
     "torch>=2.4",
     "hydra-core>=1.3",
+    # Thread-pool limits that apply after the numerical libraries have loaded.
+    # The OMP_/MKL_/OPENBLAS_ environment variables are read once, when the
+    # library is dlopen'd at `import numpy`, so setting them from Python is
+    # always too late for the current process; threadpoolctl reaches into the
+    # loaded pools instead. Required rather than optional: without it the
+    # benchmark cannot verify the condition its records claim to have run
+    # under, and an unverifiable determinism flag is worse than no flag.
+    "threadpoolctl>=3.1",
 ]
 
 [project.optional-dependencies]
@@ -262,5 +270,5 @@ disallow_untyped_calls = false
 # Third-party packages that ship no type information. Listed explicitly rather
 # than globally ignoring missing imports, so a genuinely mistyped import of a
 # typed package still fails.
-module = ["hydra.*", "omegaconf.*", "wandb.*", "pymoo.*"]
+module = ["hydra.*", "omegaconf.*", "wandb.*", "pymoo.*", "threadpoolctl"]
 ignore_missing_imports = true

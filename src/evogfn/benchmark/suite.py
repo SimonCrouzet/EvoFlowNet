@@ -30,62 +30,43 @@ Bayesian-optimisation methods running out of memory at 64. holo-bench ships
 The search radius is per round, and the anchor moves
 ----------------------------------------------------
 
-The radius used to be 4 everywhere and the anchor never moved, which made every
-Ehrlich task in the suite unwinnable by construction. Reaching reward 1.0 on an
-Ehrlich instance means placing every residue of every motif, and the parent is
-drawn independently of the planted optimum, so the two differ in roughly
-``L * (1 - 1/v)`` positions: 248 on the flagship task, 61 to 62 on the mid-size
-ones. Against one fixed Hamming ball of radius 4 the answer was not merely hard
-to find, it was absent. Regret was then reported against a target no method
-could reach, most of the column was a constant that said nothing about any
-method, and the arms were separated by whatever fraction was left.
+A single fixed Hamming ball makes an Ehrlich task unwinnable by construction.
+Reaching reward 1.0 on an Ehrlich instance means placing every residue of every
+motif, and the parent is drawn independently of the planted optimum, so the two
+differ in roughly ``L * (1 - 1/v)`` positions -- far outside a ball of the
+radius a round of mutagenesis buys. Against such a ball the answer is not merely
+hard to find, it is absent, and a regret reported against it is mostly a
+constant that says nothing about any method.
 
 The fix is not a wider radius. Real directed evolution keeps the radius small --
 four or five substitutions is what a round of site-saturation mutagenesis buys --
 and moves the *anchor*: round two starts from the best variant round one
 produced. Distance from the wild type then accumulates while the per-round
 budget does not. So every Ehrlich task here re-anchors, and its radius is the
-smallest one the audit measured to put its own optimum inside the campaign's
-reach:
+smallest one the audit put its own optimum inside the campaign's reach at.
 
-| task | landscape | protocol | per round | re-anchors | attainable optimum |
-| --- | --- | --- | --- | --- | --- |
-| `gb1-anchor` | GB1, L=4 | 4x96 | 4 | no | the landscape's own optimum |
-| `large-space` | Ehrlich, L=256 | 4x96 | 62 | yes | [0.2812, 1.0] |
-| `feasibility` | Ehrlich, L=64, density 0.15 | 4x96 | 4 | no | 0.3750 exact |
-| `protocol-alde` | Ehrlich, L=64 | 3x132 | 21 | yes | 1.0 exact |
-| `protocol-evolvepro` | the same L=64 instance | 8x48 | 4 | yes | 1.0 exact |
-| diagnostics (7) | Ehrlich, L=32 | various | 4 | yes | 1.0 exact |
-
-Two rows are not like the others, and both for stated reasons. ``gb1-anchor``
+Two tasks are not like the others, and both for stated reasons. ``gb1-anchor``
 has four sites and a budget of four, so its ball is the whole space and there is
 nothing for an anchor to move towards. ``feasibility`` keeps a fixed anchor
-because what binds there is the transition matrix, not the radius: the
-constructible set within four substitutions holds 26,580 designs and tops out at
-0.375, and a re-anchored chain searching outward from it was measured to find
-nothing better. Leaving the anchor still is what keeps that 0.375 an *enumerated*
-answer rather than a bracket, which is the difference between reporting a fact
-and reporting a search.
+because what binds there is the transition matrix, not the radius. Leaving the
+anchor still is what keeps its attainable optimum an *enumerated* answer rather
+than a bracket, which is the difference between reporting a fact and reporting a
+search.
 
-The round-varying tasks are the ones this mattered most for. Comparing 3x132
+The round-varying tasks are the ones this matters most for. Comparing 3x132
 against 8x48 asks whether many small rounds beat few large ones, and with a
-fixed anchor neither shape can move at all -- so the comparison was between two
-identically stranded campaigns.
+fixed anchor neither shape can move at all -- so the comparison would be between
+two identically stranded campaigns.
 
 Regret is against what is attainable, not against the nominal optimum
 ---------------------------------------------------------------------
 
 Even with the anchor moving, the reachable set is not the landscape. Each task
-therefore declares what [evogfn.benchmark.attainable][] measured it to contain,
+therefore declares what [evogfn.benchmark.attainable][] audited it to contain,
 and `run_task` stores regret against *that*. The declarations are constants
 rather than computations because the audit costs minutes per task, and
 ``tests/benchmark/test_suite_tasks.py`` re-derives them rather than trusting
 them.
-
-The numbers this replaces were not small. On ``large-space`` 95% of the
-published regret was a floor no method could have cleared, and on
-``feasibility`` a genetic algorithm that had *solved* the task on 99 of 100
-seeds was reported at a regret of 0.626.
 """
 
 from __future__ import annotations
@@ -123,23 +104,25 @@ GB1_MUTATIONS = 4
 LARGE_SPACE_MUTATIONS = 62
 
 #: Per-round radius on the feasibility task at L=64, and the whole radius: this
-#: task keeps a fixed anchor. Four substitutions of a sparse chain reach 26,580
-#: constructible designs out of a Hamming ball of 8e10, which is the ratio the
-#: task exists to measure. Widening it would measure something else.
+#: task keeps a fixed anchor. A sparse transition matrix makes only a small
+#: fraction of the Hamming ball at this radius constructible, and that ratio is
+#: what the task exists to measure. Widening it would measure something else.
 FEASIBILITY_MUTATIONS = 4
 
-#: Per-round radius for ALDE's three rounds. The audit measured 21 to be the
-#: point at which a re-anchored chain pins 1.0 exactly; at 4 it reaches 0.75.
+#: Per-round radius for ALDE's three rounds. Wide enough that a re-anchored
+#: chain reaches this task's own optimum in the fewest rounds any protocol here
+#: runs, which a round of mutagenesis on its own does not buy.
 ALDE_MUTATIONS = 21
 
-#: Per-round radius for EVOLVEpro's eight rounds. Four is enough here and is not
-#: enough at three rounds, which is the whole content of the protocol
-#: comparison: a shape with more rounds buys reach at the same per-round cost.
+#: Per-round radius for EVOLVEpro's eight rounds. Eight rounds accumulate from a
+#: radius a lab would recognise the reach that three rounds have to buy in one
+#: go, which is the whole content of the protocol comparison: a shape with more
+#: rounds buys reach at the same per-round cost.
 EVOLVEPRO_MUTATIONS = 4
 
 #: Per-round radius on the shared diagnostic landscape at L=32. The original
-#: shared constant, kept because re-anchoring already makes it sufficient --
-#: four rounds of it were measured to pin 1.0 exactly.
+#: shared constant, kept because re-anchoring already makes it sufficient over
+#: the rounds a diagnostic runs.
 DIAGNOSTIC_MUTATIONS = 4
 
 #: A task whose per-round radius is deliberately smaller than the distance to
@@ -161,19 +144,35 @@ CUMULATIVE = f"{CAPPED} The campaign re-anchors, so its reach is cumulative."
 #: ledger and its metrics. Declaring them rather than hashing the whole package
 #: tree is what stops an unrelated addition -- a new Pareto indicator, say --
 #: invalidating a genetic-algorithm result it cannot possibly have influenced.
-CAMPAIGN_ENTRY_POINTS = (
-    "evogfn.benchmark.methods",
-    "evogfn.loop.campaign",
-)
-
-#: What a stored campaign's result can depend on. Every methodology is built in
-#: ``benchmark.methods``, and every campaign runs through ``loop.campaign``, so
-#: their transitive imports bound what could have changed the number. Stated
-#: here rather than derived, because a wrong entry point silently shrinks the
-#: dependency set -- and a record that under-declares what it depends on is
-#: exactly the stale-result failure the fingerprint exists to prevent.
+#: What a stored campaign's result can depend on.
+#:
+#: The rule this encodes: a result is invalid if it would change under the
+#: current code, and valid if it would not. Hashing the import closure is a
+#: conservative approximation of that -- it cannot know whether an edit alters
+#: an outcome without re-running, so it assumes the worst. Where a change
+#: provably cannot alter a completed run,
+#: [bless][evogfn.benchmark.store.ResultStore.bless] is the escape hatch, and it
+#: requires naming the modules being vouched for precisely because a blanket
+#: restamp is dozens of independent assertions made in one call.
+#:
+#: ``benchmark.methods`` and ``loop.campaign`` cover how a campaign is built and
+#: run. The other two are here because neither is reachable by import from those
+#: two, and both decide what a run is:
+#:
+#: * ``benchmark.suite`` holds the task definitions, the per-task mutation
+#:   budgets, and the line that writes ``proxy_calls`` into the record. Editing
+#:   it changes what runs, or what gets recorded, and neither is reachable by
+#:   import from the two entry points above.
+#: * ``benchmark.selection`` builds the swept arms and holds their
+#:   hyperparameters, so an edit there changes what a swept arm *is*.
+#:
+#: Declaring them rather than hashing the whole package tree is still what stops
+#: an unrelated addition -- a new Pareto indicator, say -- invalidating a
+#: genetic-algorithm result it cannot possibly have influenced.
 RESULT_DEPENDENCIES = (
     "evogfn.benchmark.methods",
+    "evogfn.benchmark.selection",
+    "evogfn.benchmark.suite",
     "evogfn.loop.campaign",
 )
 
@@ -194,7 +193,7 @@ def _task(  # noqa: PLR0913 - a task is defined by what it declares
     protocol: Protocol,
     *,
     reanchor: bool,
-    attainable: Attainable,
+    attainable: Attainable | None,
 ) -> Task:
     """A task whose search radius, anchor rule and reachable optimum are all stated.
 
@@ -205,11 +204,10 @@ def _task(  # noqa: PLR0913 - a task is defined by what it declares
     would be undetectable from a stored record.
 
     ``reanchor`` and ``attainable`` are keyword-only and have **no defaults**,
-    which is the enforcement this module exists to apply. Both were previously
-    absent rather than false: every task searched one fixed ball and every
-    regret was measured against a nominal optimum, and nothing in the suite's
-    definition said so. A default would let the next task added inherit the same
-    silence.
+    which is the enforcement this module exists to apply. A task that searches
+    one fixed ball, or whose regret is taken against a nominal optimum, is
+    making a decision that has to be visible in the suite's definition, and a
+    default would let the next task added inherit it in silence.
 
     Args:
         name: Short identifier.
@@ -217,7 +215,12 @@ def _task(  # noqa: PLR0913 - a task is defined by what it declares
         build: Makes the landscape.
         protocol: Rounds, batch size and the per-round mutation budget.
         reanchor: Whether the anchor follows the best design measured so far.
-        attainable: What an audit measured this task's search space to contain.
+        attainable: What an audit found this task's search space to contain, or
+            ``None`` where no audit covers it -- which stores no regret at all.
+            Statable, never defaulted: a diagnostic that varies the *shape of
+            the reachable set* has no audited target until somebody audits each
+            rung, and declaring a neighbouring task's number would put a floor
+            no method could clear into every regret on it.
 
     Returns:
         The task.
@@ -279,10 +282,10 @@ MAIN: tuple[Task, ...] = (
             rounds=4, batch_size=PLATE, max_mutations=LARGE_SPACE_MUTATIONS, label="four plates"
         ),
         reanchor=True,
-        # The one task whose bracket the audit could not close, and the reason
-        # the interval is carried rather than a point: 0.2812 is witnessed by a
-        # design the beam actually built, 1.0 is what the reward's structure
-        # permits at 248 cumulative substitutions, and nothing measured says
+        # The one task whose bracket the audit cannot close, and the reason an
+        # interval is carried rather than a point: the lower end is witnessed by
+        # a design the beam actually built, the upper is what the reward's
+        # structure permits at 248 cumulative substitutions, and nothing settles
         # which. A comparison here is read against the interval.
         attainable=Attainable.between(
             0.2812,
@@ -296,8 +299,8 @@ MAIN: tuple[Task, ...] = (
         "matrix makes most sequences unbuildable, so rejection sampling spends "
         "the budget on designs that cannot be made while masking cannot. "
         f"{CAPPED} The anchor is held fixed: what binds here is the transition "
-        "matrix rather than the radius, and a re-anchored chain outward from "
-        "this ball was measured to find nothing better.",
+        "matrix rather than the radius, so moving outward would change what the "
+        "task measures.",
         _ehrlich(
             sequence_length=64,
             vocab_size=20,
@@ -310,10 +313,9 @@ MAIN: tuple[Task, ...] = (
             rounds=4, batch_size=PLATE, max_mutations=FEASIBILITY_MUTATIONS, label="four plates"
         ),
         reanchor=False,
-        # Enumerated, not searched: the ball holds 8e10 designs and 26,580 of
-        # them are constructible, so the maximum over the reachable set is a
-        # measurement. It is also the number that turned a 0.626 regret into a
-        # solved task.
+        # Enumerated, not searched: the constructible subset of this ball can be
+        # listed exhaustively, so the maximum over the reachable set is a
+        # measurement rather than the best a search happened to reach.
         attainable=Attainable.exactly(
             0.375, "exact: enumerated the 26,580 reachable terminal states at 4 mutations"
         ),
@@ -323,7 +325,7 @@ MAIN: tuple[Task, ...] = (
         "Does the ranking survive the shape a real campaign takes? Three rounds "
         "of 132, after ALDE's six 96-well plates over three rounds. "
         f"{CUMULATIVE} Three rounds is the fewest here, so it needs the widest "
-        "radius: 21 pins the optimum where 4 reaches 0.75.",
+        "radius to put its own optimum inside reach.",
         _ehrlich(
             sequence_length=64,
             vocab_size=20,
@@ -343,8 +345,9 @@ MAIN: tuple[Task, ...] = (
         "The opposite shape at a comparable budget: eight rounds of 48, after "
         "EVOLVEpro. Many small rounds against few large ones, on the same "
         "landscape as protocol-alde so only the shape differs. "
-        f"{CUMULATIVE} Eight rounds buy the same reach from a radius of 4 that "
-        "three rounds need 21 for, which is the point of running both.",
+        f"{CUMULATIVE} Eight rounds accumulate from a narrow per-round radius "
+        "the reach three rounds have to buy in one wide one, which is the point "
+        "of running both.",
         _ehrlich(
             sequence_length=64,
             vocab_size=20,
@@ -363,18 +366,39 @@ MAIN: tuple[Task, ...] = (
     ),
 )
 
+#: Fraction of token pairs the shared diagnostic instance permits as adjacent.
+#: Named because a family that sweeps this axis has to be able to say which of
+#: its rungs is the instance every other diagnostic already runs on -- and then
+#: reuse that task instead of defining a twin of it.
+DIAGNOSTIC_DENSITY = 0.5
+
+#: The shared diagnostic instance, as parameters rather than as a built factory.
+#: A sweep over one of them rebuilds this mapping with that one replaced, so
+#: every rung is provably the same instance in every other respect. Written out
+#: a second time by hand it would drift on the first edit to either copy, and a
+#: sweep whose rungs differ in a parameter nobody meant to vary measures
+#: something other than its own axis.
+DIAGNOSTIC_INSTANCE: dict[str, object] = {
+    "sequence_length": 32,
+    "vocab_size": 20,
+    "n_motifs": 2,
+    "motif_length": 4,
+    "transition_density": DIAGNOSTIC_DENSITY,
+    "seed": 7,
+}
+
 #: The cheap landscape every diagnostic varies an axis on.
-DIAGNOSTIC_LANDSCAPE = _ehrlich(
-    sequence_length=32,
-    vocab_size=20,
-    n_motifs=2,
-    motif_length=4,
-    transition_density=0.5,
-    seed=7,
-)
+DIAGNOSTIC_LANDSCAPE = _ehrlich(**DIAGNOSTIC_INSTANCE)
+
+#: The protocol a diagnostic runs at when it is not the protocol being varied.
+#: One frozen instance shared by every such task, so that two tasks meant to
+#: differ in one axis cannot differ in the budget as well -- and so that a task
+#: which *is* configurationally identical to another is identical by
+#: construction rather than by two literals happening to agree.
+DIAGNOSTIC_PROTOCOL = Protocol(rounds=4, batch_size=PLATE, max_mutations=DIAGNOSTIC_MUTATIONS)
 
 #: What every diagnostic can reach. One landscape and one per-round radius, so
-#: one audited answer -- measured at the fewest rounds any diagnostic runs, and
+#: one audited answer -- taken at the fewest rounds any diagnostic runs, and
 #: therefore valid for all of them, since rounds only add reach.
 DIAGNOSTIC_ATTAINABLE = Attainable.exactly(
     1.0, "pinned: 4 re-anchored rounds of 4 reach the budget-split bound at L=32"
@@ -384,8 +408,9 @@ DIAGNOSTIC_ATTAINABLE = Attainable.exactly(
 def budget_gradient() -> tuple[Task, ...]:
     """Tasks spanning the wet-lab regime to the machine-learning convention.
 
-    C5 as a curve rather than an assertion: if the ranking of methods flips
-    somewhere between 96 assays and 10,000, that location is the finding.
+    The budget axis as a curve rather than an assertion: if the ranking of
+    methods flips somewhere between 96 assays and 10,000, that location is the
+    finding.
 
     Returns:
         One task per budget, on the shared diagnostic landscape.
@@ -407,8 +432,8 @@ def rounds_curve(budget: int = 384) -> tuple[Task, ...]:
     """Tasks splitting one budget across different numbers of rounds.
 
     The diagnostic re-anchoring matters most for: with the anchor fixed, every
-    shape in this sweep searches the identical ball and the curve is flat by
-    construction, so whatever it showed was not about rounds.
+    shape in this sweep searches the identical ball, so the curve would be flat
+    by construction and about something other than rounds.
 
     Args:
         budget: Total oracle calls to hold fixed.
@@ -439,9 +464,127 @@ def objective_task() -> Task:
         "Which training objective, at equal budget? GFlowNet-only, since a "
         f"classical baseline has no objective to vary. {CUMULATIVE}",
         DIAGNOSTIC_LANDSCAPE,
-        Protocol(rounds=4, batch_size=PLATE, max_mutations=DIAGNOSTIC_MUTATIONS),
+        DIAGNOSTIC_PROTOCOL,
         reanchor=True,
         attainable=DIAGNOSTIC_ATTAINABLE,
+    )
+
+
+#: Transition densities the constructibility diagnostic sweeps, from the
+#: sparsest instance that still discriminates up to no constraint at all. What
+#: each rung is for:
+#:
+#: * **1.0** -- every adjacency permitted, so the feasible set is the whole
+#:   space and nothing bred can fail to be constructible. It is the axis's
+#:   origin and its own control: a non-zero unconstructible share here is a
+#:   fault in the measurement rather than a property of any landscape, and
+#:   without it a small share at 0.5 cannot be told from a small bug.
+#: * **`DIAGNOSTIC_DENSITY`** -- the instance every other diagnostic runs on, so
+#:   the curve passes through the configuration the rest of the diagnostics are
+#:   read at. This rung is `objective_task` itself, not a copy of it.
+#: * **0.25** -- a rung between the diagnostic and the headline setting, so
+#:   those two are not adjacent points with nothing between them to say whether
+#:   the axis bends.
+#: * **0.15** -- the density the headline ``feasibility`` task runs at. Putting
+#:   the curve through it is what lets a share measured on that task be read
+#:   against a curve rather than as an isolated number.
+#: * **0.05** -- about as sparse as this vocabulary can be while the constraint
+#:   still discriminates between designs. The instance is built around a
+#:   Hamiltonian cycle so that every token keeps a successor; as the density
+#:   approaches zero that cycle becomes the whole of the permitted adjacency,
+#:   and feasibility stops being a property of the design and becomes a property
+#:   of its first token.
+CONSTRAINT_DENSITIES: tuple[float, ...] = (0.05, 0.15, 0.25, DIAGNOSTIC_DENSITY, 1.0)
+
+
+def constraint_density() -> tuple[Task, ...]:
+    """Tasks varying how much of the sequence space is constructible at all.
+
+    The axis the feasible/reachable distinction needs and does not have. A
+    design can satisfy the transition constraint and sit inside the mutation
+    budget and still have no construction order in which every intermediate is
+    feasible, so masking can only build the reachable part of the feasible set.
+    ``unconstructible_fraction`` measures that gap on designs a run actually
+    produced -- but it is currently collected on tasks designed to measure
+    something else, which makes it telemetry rather than a result: one number,
+    at one density, with nothing to read it against.
+
+    Varying the density is what turns it into a curve. Everything else about
+    the instance is held at `DIAGNOSTIC_INSTANCE` and the protocol is
+    `DIAGNOSTIC_PROTOCOL`, so a share that moves across the family moves with
+    the constraint and with nothing else.
+
+    Only an arm that *breeds* has a share to report: the quantity counts
+    offspring a genetic teacher produced and the policy could not construct, so
+    an arm with no teacher stores a share of nothing, which is zero. Run this
+    family with a Genetic-GFN arm in it or the whole curve is a column of
+    zeros, and a column of zeros reads as "no gap" rather than as "nothing
+    bred".
+
+    Returns:
+        One task per entry in `CONSTRAINT_DENSITIES`, in that order. The rung at
+        `DIAGNOSTIC_DENSITY` **is** `objective_task`, returned rather than
+        copied: the store keys on ``(task, arm)``, so a renamed twin of a task
+        already defined pays for the same campaigns twice and files the two
+        under keys nothing can compare. The names are therefore not uniform
+        across the family, which is the intended shape and not an oversight.
+
+        Every other rung declares no attainable optimum. Lowering the density
+        shrinks the reachable set, so the audited value at
+        `DIAGNOSTIC_DENSITY` is not this task's, and carrying it across would
+        put an unclearable floor into every regret on the sparser rungs. This
+        family is read on the constructibility columns, not on regret.
+    """
+    return tuple(
+        objective_task()
+        if density == DIAGNOSTIC_DENSITY
+        else _task(
+            f"density-{density:g}",
+            f"How much of the feasible set is reachable at transition density "
+            f"{density:g}? The shared diagnostic instance in every parameter but "
+            f"that one, so the unconstructible share moves with the constraint "
+            f"alone. {CUMULATIVE}",
+            _ehrlich(**{**DIAGNOSTIC_INSTANCE, "transition_density": density}),
+            DIAGNOSTIC_PROTOCOL,
+            reanchor=True,
+            attainable=None,
+        )
+        for density in CONSTRAINT_DENSITIES
+    )
+
+
+def fixed_anchor_task() -> Task:
+    """The shared diagnostic task with the anchor held still.
+
+    The control for the first axis of the anchor study: identical to
+    `objective_task` -- same instance, same protocol, same radius -- except
+    that the search ball never moves. Everything a comparison against it
+    measures is therefore the anchor rule.
+
+    The axis is presently unmeasured rather than measured and flat. The
+    diagnostics that vary protocol shape were run when no task could move its
+    anchor, so every shape in them searched one identical Hamming ball and the
+    curves could not have separated whatever they were varying from the fact
+    that none of the campaigns could go anywhere. That is why the control has to
+    be run rather than looked up.
+
+    Returns:
+        The task. It declares no attainable optimum, and that is the honest
+        state rather than an omission: `DIAGNOSTIC_ATTAINABLE` is what four
+        *re-anchored* rounds reach, and a fixed anchor reaches one round's
+        radius from the wild type, so storing regret against the re-anchored
+        value would report the difference between two reachable sets as this
+        arm's shortfall.
+    """
+    return _task(
+        "anchor-fixed",
+        "Does moving the search ball to the best design so far help at all? "
+        "The shared diagnostic task with the anchor held still, so a comparison "
+        f"against it isolates the anchor rule from everything else. {CAPPED}",
+        DIAGNOSTIC_LANDSCAPE,
+        DIAGNOSTIC_PROTOCOL,
+        reanchor=False,
+        attainable=None,
     )
 
 
@@ -501,6 +644,113 @@ class Tier:
         return f"{self.name} ({self.purpose}, {len(self.tasks)} tasks x {len(self.seeds)} seeds)"
 
 
+def constraint_density_tier(seeds: Sequence[int]) -> Tier:
+    """The constructibility sweep as a tier.
+
+    Args:
+        seeds: Seeds per arm.
+
+    Returns:
+        A `Purpose.DIAGNOSTIC` tier over `constraint_density`. Diagnostic and
+        not benchmark: it explains what the feasibility mechanism is up against
+        on a landscape whose density we chose, which informs the discussion and
+        is not a row anyone may claim a method won.
+    """
+    return Tier("constraint-density", constraint_density(), tuple(seeds), Purpose.DIAGNOSTIC)
+
+
+@dataclass(frozen=True, slots=True)
+class AnchorCell:
+    """One cell of the anchor study: a task, an arm, and what the pair varies.
+
+    A cell rather than a tier, because this study is not a cross. A tier runs
+    every arm on every task, and here two of the combinations that cross would
+    produce are things that must not be run: one because it is already stored
+    under this exact key, and one because it is the same campaign as its
+    neighbour under a second name. Naming the cells is what keeps both out.
+
+    Attributes:
+        task: What to run. Existing tasks are returned by the functions that
+            already define them rather than rebuilt, so a cell that reuses one
+            reuses its **name**, which is half of the store's key.
+        arm: The methodology's name, and the other half of that key. Arms that
+            already exist keep their exact names for the same reason.
+        moves_anchor: Whether this cell's task re-anchors. The first axis.
+        carries_policy: Whether the arm's learned state survives a move, or
+            ``None`` where the axis does not apply -- an arm with no learned
+            state to carry, or a task whose anchor never moves, in which case
+            nothing is ever rebuilt and the two settings are one campaign.
+    """
+
+    task: Task
+    arm: str
+    moves_anchor: bool
+    carries_policy: bool | None
+
+    def __repr__(self) -> str:
+        """Name the cell by its two coordinates."""
+        anchor = "moved" if self.moves_anchor else "fixed"
+        carry = {True: "carried", False: "rebuilt", None: "no state"}[self.carries_policy]
+        return f"{self.task.name}/{self.arm} ({anchor}, {carry})"
+
+
+def anchor_study() -> tuple[AnchorCell, ...]:
+    """The cells that separate "the anchor moved" from "the policy came with it".
+
+    Two orthogonal mechanisms, and conflating them answers a different question
+    than the one this project's claim rests on.
+
+    **Does moving the ball help?** A property of the protocol, available to
+    every method, and so not ours to take credit for. That is why a genetic
+    algorithm is on this axis: if re-anchoring lifts it too, the protocol is
+    doing the work.
+
+    **Given that it moves, does bringing the trained policy along help?** This
+    is amortisation, and it is the thing a learned constructive sampler has that
+    a genetic algorithm structurally cannot: a GA's operator is the same
+    before and after a move, so it has nothing to carry. The claim worth making
+    is not that a trained policy is useful, which is trivial, but that it
+    remains useful after the ball it was trained on has moved -- so the cell
+    that matters is the interaction, and the fixed-anchor row is what makes it
+    specific rather than a restatement of "training helps".
+
+    No baselines beyond the one contrast, for the reason the ``+screen`` /
+    ``+search`` ladder has none: this is an ablation, and an ablation answers
+    which part of a method does the work. Which method wins is a different
+    question with its own table.
+
+    Returns:
+        Five cells, of which the store already holds one under this exact key.
+
+        The re-anchored GFlowNet cell is `objective_task` under its shipped arm
+        name -- the same campaign the objectives diagnostic already ran, reused
+        rather than re-declared, since a renamed twin would pay for it twice and
+        file the two copies where nothing can compare them.
+
+        The fixed-anchor row carries **one** GFlowNet cell rather than two.
+        Carrying and rebuilding differ only in what happens when the anchor
+        moves, and it never moves there, so the two arms describe the same
+        campaign; running both would be the twin this study is arranged to
+        avoid, and the interaction is read from the moved row against a shared
+        control.
+
+        A caveat on what "already stored" means for the genetic cell: the
+        configuration of `objective_task` is also defined under two other names
+        in this module, so a baseline result at this configuration may exist on
+        disk under one of those keys instead. The study names the canonical task
+        and lets the store decide what is missing.
+    """
+    moved = objective_task()
+    fixed = fixed_anchor_task()
+    return (
+        AnchorCell(moved, "gfn-tb", moves_anchor=True, carries_policy=True),
+        AnchorCell(moved, "gfn-tb-rebuilt", moves_anchor=True, carries_policy=False),
+        AnchorCell(fixed, "gfn-tb", moves_anchor=False, carries_policy=None),
+        AnchorCell(moved, "genetic", moves_anchor=True, carries_policy=None),
+        AnchorCell(fixed, "genetic", moves_anchor=False, carries_policy=None),
+    )
+
+
 def _scores(
     task: Task, result: CampaignResult, attainable: AttainableOptimum | None
 ) -> dict[str, object]:
@@ -512,11 +762,11 @@ def _scores(
     column, and what that pair *is* differs by objective count:
 
     * **One objective.** Best value measured, and the distance from it to the
-      **attainable** optimum -- what the audit measured this task's search space
-      to contain, conservatively its searched lower bound. Not the landscape's
-      own optimum: on ``large-space`` 95% of the regret computed that way was a
-      floor no method could clear, and on ``feasibility`` an arm sitting exactly
-      on the reachable maximum was reported at a regret of 0.626.
+      **attainable** optimum -- what the audit found this task's search space to
+      contain, conservatively its searched lower bound. Not the landscape's own
+      optimum: a target outside the reachable set contributes a floor no method
+      could clear, and an arm sitting exactly on the reachable maximum would
+      still be reported at a regret.
     * **More than one.** Hypervolume above the campaign's reference point, and
       IGD+ against its reference front. These are the multi-objective
       counterparts with the same orientation -- hypervolume rises as the set
@@ -536,7 +786,7 @@ def _scores(
         result: The completed campaign.
         attainable: What this task's search space was audited to contain, or
             ``None`` where no audit covers it -- in which case no regret is
-            stored at all. An absent number is recoverable; a number measured
+            stored at all. An absent number is recoverable; a number taken
             against an unreachable target is not distinguishable from a real one
             once it is in the column.
 
@@ -636,8 +886,16 @@ def run_task(
             continue
         started = time.perf_counter()
         for seed in outstanding:
+            # Both clocks start before the methodology is built, not before
+            # `run`. Fitting a surrogate over an exhaustive library is part of
+            # what a method costs, and timing only the loop would credit MLDE
+            # for the expensive half of its own work.
+            cpu_started = time.process_time()
+            wall_started = time.perf_counter()
             campaign = method(task, seed)
             result = campaign.run()
+            cpu_seconds = time.process_time() - cpu_started
+            wall_seconds = time.perf_counter() - wall_started
             method_sampler = campaign.sampler
             feasible = (
                 float(landscape.is_feasible(result.sequences).mean())
@@ -649,8 +907,8 @@ def run_task(
                     # Declaring entry points is what makes the fingerprint pay: a
                     # record then goes stale only when something it can
                     # actually reach changed, instead of when any package did.
-                    # Without this the mechanism is correct and useless --
-                    # adding an unrelated file invalidated ~3,900 campaigns.
+                    # Without this the mechanism is correct and useless:
+                    # adding an unrelated file invalidates the whole store.
                     depends_on=RESULT_DEPENDENCIES,
                     task=task.name,
                     method=name,
@@ -660,12 +918,41 @@ def run_task(
                     # records at 4x96=384 that differ in search radius or in
                     # whether the anchor moved are not comparable.
                     protocol=repr(task),
+                    # By attribute, like the sampler quantities below: an arm
+                    # built by this module declares what it closed over, and a
+                    # methodology defined anywhere else is a plain callable that
+                    # declares nothing. Empty is then the honest record -- the
+                    # settings were not stated, which is not the same as an arm
+                    # having none, and the alternative would be inventing a
+                    # configuration for a closure nobody can see into.
+                    parameters=dict(getattr(method, "parameters", {})),
                     **_scores(task, result, attainable),
                     diversity=(diversity(result.sequences) if len(result.sequences) > 1 else 0.0),
                     feasible_fraction=feasible,
                     oracle_calls=result.oracle_calls,
                     proposals=result.proposals,
                     proxy_calls=int(getattr(method_sampler, "proxy_calls", 0)),
+                    # By attribute, like the proxy spend above: a sampler that
+                    # breeds nothing simply does not carry these, and asking the
+                    # base interface for them would make every baseline declare
+                    # a quantity only one method can measure.
+                    bred_designs=int(getattr(method_sampler, "bred_designs", 0)),
+                    unconstructible_fraction=float(
+                        getattr(method_sampler, "unconstructible_fraction", 0.0)
+                    ),
+                    # Processor time is what the arms are compared on; elapsed
+                    # time is kept beside it only so a reader can see how hard
+                    # the machine was contended when this ran. A suite is
+                    # sharded across a dozen processes, so the two diverge by a
+                    # factor that says nothing about any method.
+                    cpu_seconds=cpu_seconds,
+                    wall_seconds=wall_seconds,
+                    # By attribute, like the sampler quantities above, and for
+                    # the same reason: this lands from the campaign rather than
+                    # from here, and a run against a campaign that does not yet
+                    # report it stores zero instead of failing. Zero is also the
+                    # honest reading for a sampler that cannot repeat itself.
+                    duplicate_fraction=float(getattr(result, "duplicate_fraction", 0.0)),
                     deterministic=is_deterministic(),
                     top_sequences=_top_designs(result),
                     trace=result.trace(),
@@ -723,6 +1010,41 @@ def run_tier(
     """
     report(f"{tier!r}")
     return sum(run_task(task, methods, store, tier.seeds, report=report) for task in tier.tasks)
+
+
+def run_anchor_study(
+    store: ResultStore,
+    seeds: Sequence[int],
+    *,
+    report: Callable[[str], None] = print,
+) -> int:
+    """Run whatever the anchor study is missing, one cell at a time.
+
+    Cell by cell rather than by tier, and that is the whole content of this
+    function: a tier crosses its tasks with its arms, and the cross of this
+    study's two tasks and three arms contains a cell that is already stored and
+    a cell that is a second name for its neighbour. Running the cross would pay
+    for both and leave a reader unable to tell which of two identically-valued
+    rows was the real one.
+
+    Args:
+        store: Where results go, and what says which cells are already held.
+        seeds: Seeds per cell.
+        report: Where progress lines go.
+
+    Returns:
+        How many campaigns were actually run.
+    """
+    from evogfn.benchmark.methods import anchor_arms  # noqa: PLC0415 - the arms import tasks
+
+    arms = anchor_arms()
+    ran = 0
+    for cell in anchor_study():
+        # One tier per cell so the purpose travels with it: these results
+        # explain a mechanism and are never a row in the results table.
+        tier = Tier(f"anchor:{cell!r}", (cell.task,), tuple(seeds), Purpose.DIAGNOSTIC)
+        ran += run_tier(tier, {cell.arm: arms[cell.arm]}, store, report=report)
+    return ran
 
 
 def records_to_metric(

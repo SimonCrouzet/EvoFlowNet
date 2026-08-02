@@ -1,9 +1,9 @@
 """Genetic-GFN: a genetic algorithm used as the GFlowNet's teacher.
 
 Kim et al. (2024) report the single most useful negative-to-positive result in
-this literature. On PMO a vanilla GFlowNet scores 9.93 against Mol GA's 15.69 --
-a 58% deficit -- and Genetic-GFN reaches 16.21 by *absorbing* the GA rather than
-competing with it. Directed evolution is itself a genetic algorithm, and the
+this literature. On PMO a vanilla GFlowNet trails Mol GA, and Genetic-GFN
+overtakes it by *absorbing* the GA rather than competing with it. Directed
+evolution is itself a genetic algorithm, and the
 Ehrlich benchmark's own baseline is one, so shipping vanilla trajectory balance
 and reporting a loss would be a result about our implementation rather than
 about GFlowNets.
@@ -33,6 +33,24 @@ than to reward. Fitness scales differ by orders of magnitude between landscapes
 and across a campaign's rounds, so a reward-proportional buffer is implicitly
 re-tuned by the landscape; rank is invariant to any monotone rescaling, which
 means one setting works everywhere.
+
+What the teacher breeds that the policy cannot build
+----------------------------------------------------
+
+A genetic algorithm recombines two designs and gets a third that satisfies the
+environment's constraint and sits inside the mutation budget -- and that
+nevertheless has no ordering of its mutations along which *every intermediate*
+is also feasible. Masking builds the reachable part of the feasible set, so such
+an offspring is not a terminal state of this graph at all: replay finds no
+backward path to it and the row is dropped.
+
+That share is not bookkeeping. It is the feasible-but-unreachable gap showing up
+in *training*, on designs a run actually bred, rather than in an enumeration over
+a toy instance -- which is the only evidence the gap otherwise has. So it is
+counted where it happens: `GeneticTrainingResult` carries what was handed to
+replay and what could not be constructed, and
+[GFlowNetSampler][evogfn.algorithms.gflownet.sampler.GFlowNetSampler] accumulates
+both over a campaign for the benchmark record to store.
 
 Known limitation
 ----------------
@@ -106,6 +124,33 @@ class GeneticConfig:
             raise ValueError(f"mix must lie in [0, 1], got {self.mix}")
         if self.warmup < 0:
             raise ValueError(f"warmup must be non-negative, got {self.warmup}")
+
+
+@dataclass(slots=True)
+class GeneticTrainingResult(TrainingResult):
+    """A completed run, plus how much of the teacher's output was usable.
+
+    Separate from `TrainingResult` because these counts only mean anything where
+    designs enter training from outside the policy. Plain trajectory balance
+    constructs every trajectory it trains on, so a zero there would be a
+    property of the algorithm rather than a measurement of the landscape, and
+    reporting it beside a real one would invite exactly that confusion.
+
+    Attributes:
+        bred_designs: Offspring handed to replay: bred by the genetic algorithm,
+            admitted by the environment as feasible and inside the mutation
+            budget, and ranked high enough to earn a place in the training
+            batch. Offspring rejected before that point were infeasible or out
+            of budget, which is a different failure and is deliberately not
+            counted here -- mixing the two would report the constraint's
+            severity as though it were the reachability gap.
+        unconstructible_designs: How many of those had no construction order, so
+            no backward path existed and the row was dropped. Feasible, inside
+            the budget, and still not a terminal state of this graph.
+    """
+
+    bred_designs: int = 0
+    unconstructible_designs: int = 0
 
 
 class RankedBuffer:
@@ -215,7 +260,7 @@ def train_genetic_gfn(  # noqa: PLR0913 - the run is defined by its parts
     genetic_config: GeneticConfig | None = None,
     objective: GFlowNetObjective | None = None,
     tracker: Tracker | None = None,
-) -> TrainingResult:
+) -> GeneticTrainingResult:
     """Train a policy with a genetic algorithm supplying off-policy targets.
 
     Args:
@@ -233,7 +278,8 @@ def train_genetic_gfn(  # noqa: PLR0913 - the run is defined by its parts
         tracker: Where to report.
 
     Returns:
-        The losses, the learned ``log Z``, and the evaluations consumed.
+        The losses, the learned ``log Z``, the evaluations consumed, and how
+        much of what the teacher bred the policy could actually construct.
 
     Raises:
         ValueError: If the objective needs a per-step record. Replayed
@@ -260,7 +306,7 @@ def train_genetic_gfn(  # noqa: PLR0913 - the run is defined by its parts
     generator = torch.Generator().manual_seed(config.seed)
     rng = np.random.default_rng(config.seed)
     buffer = RankedBuffer(settings.buffer_size)
-    result = TrainingResult()
+    result = GeneticTrainingResult()
 
     for step in range(config.steps):
         fraction = step / max(config.steps - 1, 1)
@@ -300,6 +346,15 @@ def train_genetic_gfn(  # noqa: PLR0913 - the run is defined by its parts
                     replayed, constructed = replay(
                         env, policy, offspring[chosen], generator=generator
                     )
+                    # Counted here because here is the only place it is
+                    # observable: this is the one point in a run where the
+                    # environment is asked for a path to a design it did not
+                    # itself propose, so it is the one point where feasible and
+                    # constructible can be seen to differ. Left uncounted, the
+                    # drop is silent and the gap has to be re-measured by
+                    # instrumenting a run by hand.
+                    result.bred_designs += int(chosen.size)
+                    result.unconstructible_designs += int((~constructed).sum())
                     if constructed.any():
                         batches.append(
                             (

@@ -8,14 +8,54 @@ difference between methods rather than between harnesses.
 What a round does
 -----------------
 
-#. The sampler proposes a **pool** of candidates -- far more than can be
-   measured. Generating them is free.
+#. The sampler proposes a **pool** of candidates. How large that pool is, is a
+   property of the method -- a genetic algorithm's is its population, MLDE's is
+   its library -- and generating them is free either way.
+#. Designs measured in an *earlier* round are dropped, and the sampler is asked
+   again until the plate can be filled without them.
 #. The surrogate scores the pool; the acquisition rule turns predictions and
    uncertainty into one number per candidate.
 #. The batch selector picks the ``batch_size`` that will actually be measured.
 #. The oracle evaluates exactly those, and only those are charged.
 #. The surrogate is refitted on everything measured so far, and the sampler is
    told what its proposals scored.
+
+The plate is always full
+------------------------
+
+Every round charges exactly ``batch_size`` oracle calls, so a campaign spends
+exactly ``rounds * batch_size``. That is an invariant rather than a tendency,
+and it is stated here because the alternative is silent: with a pool the size of
+the plate, deduplicating it and assaying whatever survives leaves part of the
+oracle budget unspent without any round reporting an error, and the budget every
+claim is indexed by is then wrong in the direction that flatters whichever
+method happens to repeat itself least.
+
+Where the line between "already measured" and "measured twice" is drawn
+-----------------------------------------------------------------------
+
+**Across rounds, the campaign remembers.** A design measured in an earlier round
+is not re-ordered, and the sampler is asked again until the plate fills without
+it. This is protocol, on the same footing as re-anchoring: the whole reason to
+run rounds rather than one large batch is that each round is informed by what
+the last one measured, and a lab does not re-assay a variant whose number is
+already in the notebook. It is given to every arm on that reasoning, not to one
+method as a favour.
+
+**Within a round, duplicates are charged.** A genetic algorithm that breeds 96
+offspring of which 10 are identical has consumed 96 wells and bought 86 distinct
+data points, and that is the real price of its own convergence. Silently
+collapsing them would hand a converging method free measurements and hide the
+one cost convergence has. The topping-up above serves the cross-round memory and
+nothing else: it never launders a repeat the sampler produced inside one plate.
+[RoundRecord.duplicate_fraction][evogfn.loop.ledger.RoundRecord.duplicate_fraction]
+reports what that cost, so it is measurable rather than assumed.
+
+``distinct_batch`` is the ablation that moves the line, filling the plate with
+``batch_size`` distinct designs instead of ``batch_size`` proposals. It is a
+separate arm rather than a post-hoc correction because deduplicating changes
+*which* designs get measured, so the two campaigns diverge from round one and
+neither can be derived from the other's ledger.
 
 Why the sampler does not touch the oracle
 -----------------------------------------
@@ -44,12 +84,11 @@ wild type, not sixteen. That is not what directed evolution does. Each real roun
 starts from the best variant the last one produced, and cumulative distance grows
 while the per-round budget does not.
 
-The difference is not a matter of degree. On this repository's Ehrlich tasks the
-planted optimum lies 61-248 mutations from the wild type against a per-round
-budget of four, so under a fixed anchor no method can reach it *in principle* --
-and a regret reported against it is a regret nothing could have closed, which is
-how two different methods came to report exactly the same figure to three decimal
-places across a hundred seeds.
+The difference is not a matter of degree. A planted optimum can sit further from
+the wild type than a per-round mutation budget reaches, so under a fixed anchor
+no method can reach it *in principle* -- and a regret reported against it is a
+regret nothing could have closed, which every method reports identically and
+which says nothing about any of them.
 
 ``reanchor`` turns the mechanism on, and it is off by default so that no number
 already reported moves without someone asking for it. What the sampler needs when
@@ -132,8 +171,17 @@ DEFAULT_BATCH_SIZE = 96
 #: Rounds per campaign. Three to four is what published wet-lab campaigns run.
 DEFAULT_ROUNDS = 4
 
-#: Candidates generated per round before selection. Free, so generous.
+#: Candidates generated per round before selection. Free, so generous -- but a
+#: default rather than a right answer: a method's pool is a published property
+#: of that method, and [evogfn.benchmark.methods][] sets it per arm.
 DEFAULT_POOL_SIZE = 2048
+
+#: Proposal calls one round may make before it gives up on filling its plate.
+#: Generous, because a call is free against the oracle budget and the only thing
+#: this bound is protecting against is a sampler that can produce *nothing* new
+#: -- which is a terminal condition, not a slow one. Reached only when the
+#: sampler's unmeasured reachable set is effectively empty.
+MAX_PROPOSAL_ATTEMPTS = 32
 
 #: Below two sequences, pairwise diversity is undefined rather than zero.
 _MIN_FOR_DIVERSITY = 2
@@ -217,17 +265,37 @@ class Campaign:
         selector: Picks the batch to measure. Defaults to
             [TopK][evogfn.acquisition.rules.TopK].
         rounds: How many design-build-test-learn cycles.
-        batch_size: Variants measured per round.
-        pool_size: Candidates generated per round before selection.
+        batch_size: Variants measured per round. Every round measures exactly
+            this many.
+        pool_size: Candidates the sampler is asked for per proposal call. This
+            is a property of the method rather than a harness setting -- a
+            genetic algorithm's population is its plate, MLDE's library is
+            thousands -- so it belongs to whoever builds the sampler. Where it
+            equals ``batch_size`` the campaign still fills the plate, by asking
+            again.
         initial_design: Sequences to measure in round 0. ``None`` takes them
-            from the sampler, unassisted.
-        skip_measured: Drop candidates already measured, and duplicates
-            within the pool, before selection. A lab does not re-order a variant
-            it has already assayed, and a sampler that has collapsed onto one
-            mode would otherwise spend its whole budget re-measuring it. Setting
-            this false disables deduplication entirely, which is the ablation
+            from the sampler, unassisted. Fewer than ``batch_size`` of them is
+            allowed and the rest of the plate is topped up from the sampler:
+            round 0 is charged like every other round, and a short opening plate
+            would be budget quietly not spent.
+        skip_measured: Skip candidates measured in an *earlier round*, and keep
+            asking until the plate fills without them. A lab does not re-order a
+            variant whose number is already in the notebook, and a sampler that
+            has collapsed onto one mode would otherwise spend its whole budget
+            re-measuring it. Repeats *within* one round are charged regardless:
+            they are the cost of the method's own convergence, and
+            ``distinct_batch`` is the ablation that removes them. Setting this
+            false gives the campaign no memory at all, which is the ablation
             that says how much of a method's apparent efficiency is the
             screening rather than the method.
+        distinct_batch: Fill the plate with ``batch_size`` *distinct* designs
+            rather than ``batch_size`` proposals, asking the sampler again for
+            whatever the duplicates cost. Off by default because charging them
+            is what makes convergence cost something. On, this is the same
+            algorithm run under a different plate rule, and it is a separate
+            campaign rather than a re-reading of the bare one: removing a
+            duplicate changes which design takes that well, so the two diverge
+            from round one.
         tracker: Where per-round metrics go.
         artifact_dir: Where to write each round's batch, as a chained artifact.
             ``None`` writes nothing, which is right for a benchmark sweep where
@@ -248,8 +316,7 @@ class Campaign:
         environment: The mutation environment the sampler searches. Supplying it
             makes the ledger record which design each round was anchored to and
             how far that sat from the wild type, and it is what ``reanchor``
-            moves. ``None`` leaves the anchor untracked and unmoved, exactly as
-            before.
+            moves. ``None`` leaves the anchor untracked and unmoved.
         reanchor: Move the environment's anchor to the best feasible design
             measured so far, at the end of every round. Off by default: turning
             it on changes what a campaign can reach, so no number already
@@ -289,6 +356,7 @@ class Campaign:
         pool_size: int = DEFAULT_POOL_SIZE,
         initial_design: Tokens | None = None,
         skip_measured: bool = True,
+        distinct_batch: bool = False,
         tracker: Tracker | None = None,
         artifact_dir: Path | None = None,
         reference_point: npt.ArrayLike | None = None,
@@ -341,6 +409,7 @@ class Campaign:
         self._pool_size = pool_size
         self._initial_design = initial_design
         self._skip_measured = skip_measured
+        self._distinct_batch = distinct_batch
         self._tracker = tracker or NoOpTracker()
         self._artifact_dir = artifact_dir
         self._environment = environment
@@ -402,7 +471,18 @@ class Campaign:
         """Execute every round and return the ledger.
 
         Returns:
-            The measurements and the accounting behind them.
+            The measurements and the accounting behind them. Exactly
+            [budget][evogfn.loop.campaign.Campaign.budget] oracle calls were
+            charged, and the ledger says which.
+
+        Raises:
+            RuntimeError: If a round cannot fill its plate -- the sampler was
+                asked ``MAX_PROPOSAL_ATTEMPTS`` times and could not between them
+                produce ``batch_size`` designs the campaign had not already
+                measured. Stopping quietly with a short plate is what this
+                replaces, and it is the worse answer: the run then reports a
+                full-looking ledger against a budget it never spent, and nothing
+                in the numbers says so.
         """
         measured: list[Tokens] = []
         values: list[Fitness] = []
@@ -416,18 +496,11 @@ class Campaign:
         best_anchor_value = float("-inf")
 
         for index in range(self._rounds):
-            remaining = self.budget - spent
-            if remaining <= 0:
-                break
-
-            proposed, screened, batch, predicted = self._design(
-                index, measured, values, seen, remaining
-            )
-            if batch.shape[0] == 0:
-                # The sampler cannot produce anything unmeasured. Stopping is
-                # honest; padding the batch with repeats would spend the budget
-                # to manufacture a full-looking ledger.
-                break
+            # No `remaining` arithmetic: every round fills its plate or raises,
+            # so the batch is always `batch_size` and a running check against
+            # the budget would be a branch that can never be taken. `spent` is
+            # kept because the tracker reports it, not because it gates anything.
+            proposed, screened, batch, predicted = self._design(index, measured, values, seen)
 
             scores = self._landscape.evaluate(batch)
             spent += batch.shape[0]
@@ -465,6 +538,7 @@ class Campaign:
                 "best_in_round": record.best_in_round,
                 "batch_diversity": record.batch_diversity,
                 "feasible_fraction": record.feasible_fraction,
+                "duplicate_fraction": record.duplicate_fraction,
                 "oracle_calls": float(spent),
             }
             # Logged only when it exists. A key that is always present and
@@ -516,18 +590,31 @@ class Campaign:
         measured: list[Tokens],
         values: list[Fitness],
         seen: set[bytes],
-        remaining: int,
     ) -> tuple[int, int, Tokens, npt.NDArray[np.floating] | None]:
         """Choose the batch, returning proposals generated, pool screened, and batch.
 
         Round 0 has nothing to fit a surrogate on, so it is the sampler's own
         proposals unassisted. Every later round refits on the accumulated
-        measurements first. Deduplication applies from round 0 onward: a plate
-        of eight copies of one variant is one experiment however it arose, and
-        exempting the first round would let a collapsed sampler book a full
-        opening plate for a single measurement's worth of information.
+        measurements first.
+
+        Args:
+            index: Zero-based round number.
+            measured: Every earlier round's designs, for refitting.
+            values: Their objective values, aligned with ``measured``.
+            seen: Every design measured so far, as row bytes. Read to decide
+                what the plate may still hold; updated by the caller once the
+                batch has actually been charged.
+
+        Returns:
+            Proposals generated, proposals that reached the selector, the batch
+            of exactly ``batch_size`` designs to measure, and what the surrogate
+            predicted for them where there was one.
+
+        Raises:
+            RuntimeError: If the plate cannot be filled; see
+                [_fill][evogfn.loop.campaign.Campaign._fill].
         """
-        size = min(self._batch_size, remaining)
+        size = self._batch_size
         fitted = False
         if index > 0 and self._surrogate is not None:
             # A method can fail to produce a single buildable design in a whole
@@ -546,13 +633,13 @@ class Campaign:
                 self._surrogate.fit(np.concatenate(measured), history)
                 fitted = True
 
-        pool = self._pool(index)
-        proposed = pool.shape[0]
-        if self._skip_measured:
-            pool = self._unmeasured(pool, seen)
+        proposed, pool = self._fill(index, seen, size)
         screened = pool.shape[0]
-        # Round 0 has no model to score with, so the pool order stands.
-        if screened == 0 or index == 0 or self._surrogate is None or not fitted:
+        # Round 0 has no model to score with, so the pool order stands. Taking a
+        # prefix is not arbitrary: a sampler that ranks its own output -- MLDE
+        # returns its library best-first -- has already said which designs it
+        # would send to the lab, and reordering them would measure the harness.
+        if index == 0 or self._surrogate is None or not fitted:
             return proposed, screened, pool[:size], None
 
         mean, spread = self._surrogate.predict(pool)
@@ -634,10 +721,10 @@ class Campaign:
             position = int(tied[0])
         else:
             # A tie, and moving is still right. Rewards here are products of
-            # quantised terms, so they are flat across most of a neighbourhood:
-            # requiring a strict improvement left whole campaigns anchored at
-            # the wild type -- measured, random and genetic traced [0, 0, 0, 0]
-            # over four rounds, so the mechanism never fired for them.
+            # quantised terms, so they are flat across most of a neighbourhood,
+            # and requiring a strict improvement would leave a campaign pinned
+            # at the wild type for its whole life with the mechanism never
+            # firing.
             #
             # Among equally good designs, take the one furthest from the current
             # anchor. That crosses the plateau rather than sitting on it, and it
@@ -661,24 +748,107 @@ class Campaign:
         self._environment = env
         return float(flat[position])
 
-    def _pool(self, index: int) -> Tokens:
-        """The candidates this round selects from, before deduplication."""
-        if index == 0 and self._initial_design is not None:
+    def _fill(self, index: int, seen: set[bytes], size: int) -> tuple[int, Tokens]:
+        """Ask the sampler until the plate can be filled, and say what that cost.
+
+        One call to a sampler whose pool is its published population -- 96 for a
+        genetic algorithm -- returns exactly one plate's worth, and any of it the
+        campaign has already measured leaves the plate short. Asking again is
+        what fills it, and it is the whole reason this loop exists: without it,
+        the round assays whatever survives the filter and leaves the rest of the
+        budget unspent without saying so.
+
+        What the loop does *not* do is remove a repeat the sampler produced
+        inside a single call. Those stay in the pool and go on to consume wells,
+        because they are the method's own convergence rather than the harness's
+        bookkeeping -- unless ``distinct_batch`` is set, which is the arm that
+        asks what the alternative plate rule would have measured.
+
+        Args:
+            index: Zero-based round number. Only round 0 may draw its first
+                candidates from a supplied initial design.
+            seen: Designs measured in earlier rounds, as row bytes.
+            size: Wells to fill.
+
+        Returns:
+            Candidates generated across every call made, and the pool the
+            selector will choose from -- at least ``size`` rows, in the order
+            the sampler produced them.
+
+        Raises:
+            RuntimeError: If ``MAX_PROPOSAL_ATTEMPTS`` calls could not between
+                them produce ``size`` admissible designs. Loud because the
+                alternative is a campaign reporting a full ledger against a
+                budget it never spent, and because the condition is terminal:
+                the sampler's unmeasured reachable set is empty, and a further
+                round would find it empty too.
+        """
+        proposed = 0
+        held = 0
+        collected: list[Tokens] = []
+        plated: set[bytes] = set()
+        for attempt in range(MAX_PROPOSAL_ATTEMPTS):
+            chunk = np.ascontiguousarray(self._propose(index, attempt))
+            proposed += chunk.shape[0]
+            keep = self._admissible(chunk, seen, plated)
+            if keep.size:
+                collected.append(chunk[keep])
+                held += int(keep.size)
+            if held >= size:
+                return proposed, np.concatenate(collected)
+        raise RuntimeError(
+            f"{self._sampler.name} filled {held} of {size} wells in round {index} across "
+            f"{MAX_PROPOSAL_ATTEMPTS} proposal calls ({proposed} candidates); it cannot produce "
+            f"designs this campaign has not already measured, so the remaining budget could only "
+            f"be spent re-measuring them"
+        )
+
+    def _propose(self, index: int, attempt: int) -> Tokens:
+        """One call's worth of candidates, from the design or from the sampler.
+
+        Args:
+            index: Zero-based round number.
+            attempt: Which call this is within the round, from zero.
+
+        Returns:
+            The candidates. A supplied initial design is round 0's *first* call
+            only: it is a stated opening plate, not a well the sampler may keep
+            re-proposing, and topping it up has to come from somewhere that can
+            produce something new.
+        """
+        if index == 0 and attempt == 0 and self._initial_design is not None:
             return np.asarray(self._initial_design)
         return self._sampler.propose(self._pool_size)
 
-    def _unmeasured(self, pool: Tokens, seen: set[bytes]) -> Tokens:
-        """Drop candidates already measured, and duplicates within the pool."""
-        array = np.ascontiguousarray(pool)
+    def _admissible(
+        self, pool: Tokens, seen: set[bytes], plated: set[bytes]
+    ) -> npt.NDArray[np.intp]:
+        """Positions in ``pool`` this round may still spend a well on.
+
+        Args:
+            pool: One proposal call's candidates, C-contiguous.
+            seen: Designs measured in earlier rounds.
+            plated: Designs already admitted to *this* round's pool. Mutated
+                here, and carried across the round's proposal calls so that
+                ``distinct_batch`` deduplicates the plate rather than each call
+                separately.
+
+        Returns:
+            The positions to keep, in order.
+        """
+        if not self._skip_measured and not self._distinct_batch:
+            return np.arange(pool.shape[0], dtype=np.intp)
         keep: list[int] = []
-        batch_seen: set[bytes] = set()
-        for position, row in enumerate(array):
+        for position, row in enumerate(pool):
             key = row.tobytes()
-            if key in batch_seen or key in seen:
+            if self._skip_measured and key in seen:
                 continue
-            batch_seen.add(key)
+            if self._distinct_batch:
+                if key in plated:
+                    continue
+                plated.add(key)
             keep.append(position)
-        return array[keep]
+        return np.asarray(keep, dtype=np.intp)
 
     def _record(  # noqa: PLR0913 - a round record is its fields
         self,
@@ -696,7 +866,8 @@ class Campaign:
 
         Args:
             index: Zero-based round number.
-            proposed: Candidates the sampler generated.
+            proposed: Candidates the sampler generated, across every proposal
+                call the round needed.
             screened: Proposals that reached the selector.
             batch: The sequences measured.
             scores: Their ``(n, n_objectives)`` measured values.
@@ -724,6 +895,7 @@ class Campaign:
             batch_diversity=(diversity(batch) if batch.shape[0] >= _MIN_FOR_DIVERSITY else 0.0),
             surrogate_correlation=_correlation(predicted, flat),
             hypervolume=self._hypervolume(history),
+            duplicates=_duplicates(batch),
         )
 
     def _hypervolume(self, history: list[Fitness] | None) -> float:
@@ -784,6 +956,24 @@ class Campaign:
             f"Campaign(sampler={self._sampler.name}, rounds={self._rounds}, "
             f"batch_size={self._batch_size}, budget={self.budget})"
         )
+
+
+def _duplicates(batch: Tokens) -> int:
+    """Wells in ``batch`` holding a design already elsewhere on the same plate.
+
+    Counted on the batch that was charged rather than on the pool it came from,
+    because a well is what a duplicate costs: a pool may hold a design twice and
+    have neither copy selected, and that cost nothing.
+
+    Args:
+        batch: The ``(n, sequence_length)`` designs measured this round.
+
+    Returns:
+        ``n`` minus the number of distinct designs among them, so zero when
+        every well holds something different.
+    """
+    rows = np.ascontiguousarray(batch)
+    return int(rows.shape[0] - len({row.tobytes() for row in rows}))
 
 
 def _correlation(

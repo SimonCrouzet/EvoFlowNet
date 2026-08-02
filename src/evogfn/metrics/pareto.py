@@ -22,15 +22,34 @@ Refusing rather than approximating
 ----------------------------------
 
 [hypervolume][evogfn.metrics.pareto.hypervolume] is exact in every dimension it
-accepts and raises past the point where its exact method becomes intractable. An
-approximate hypervolume reported next to an exact one is worse than no number at
-all, because nothing in the output says which one it is.
+accepts and raises past the point where its own exact method becomes
+intractable. An approximate hypervolume reported next to an exact one is worse
+than no number at all, because nothing in the output says which one it is.
+
+Where the front is too large for that method and the optional `moo` extra is
+installed, the answer comes from pymoo instead -- also exact, and polynomial in
+the front size rather than exponential. That path exists because front size
+grows with how well an arm did, so the built-in limit binds hardest on exactly
+the arms whose number is most worth having.
+
+Optional, and it stays optional
+-------------------------------
+
+pymoo is imported here and nowhere else, lazily, and its absence is a fallback
+rather than an error -- so the core of this package remains numpy and torch for
+anyone not running the multi-objective suite. It is only ever consulted where
+the built-in method **cannot** run, never in place of it: an optional dependency
+should extend what can be computed, not silently change a number that a plain
+install would already have produced. The two agree to floating tolerance
+wherever both apply, which is what
+`tests/metrics/test_pareto.py::TestPymooAgreesWithInclusionExclusion` asserts.
 """
 
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
+from functools import cache
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -39,11 +58,25 @@ if TYPE_CHECKING:
 
     from evogfn.core.types import Fitness
 
-#: Largest number of front points :func:`hypervolume` will accept in three or
-#: more objectives. Beyond two objectives it uses inclusion--exclusion, which is
-#: exact but sums ``2^k - 1`` terms, so the limit is where that stops being
-#: seconds and starts being hours. Two objectives use a sweep and have no limit.
+#: Largest number of front points the **built-in** exact hypervolume will accept
+#: in three or more objectives. Beyond two objectives it uses
+#: inclusion--exclusion, which is exact but sums ``2^k - 1`` terms, so the limit
+#: is where that stops being seconds and starts being hours. Two objectives use a
+#: sweep and have no limit. Past this, :func:`hypervolume` hands the front to
+#: pymoo when the `moo` extra is installed and raises when it is not.
 MAX_INCLUSION_EXCLUSION_POINTS = 16
+
+# What a refusal says. Shared by the two places that can reach it so that the
+# advice stays one sentence in one place: the fix is an install, not a rewrite.
+_TOO_LARGE = (
+    "exact hypervolume in {d} objectives is computed here by inclusion-exclusion over "
+    "the front, which sums 2^k terms and is limited to k = "
+    f"{MAX_INCLUSION_EXCLUSION_POINTS}"
+    " points; this front has {k}. Install the optional extra -- `uv sync --extra moo`, "
+    "or `pip install evogfn[moo]` -- and pymoo computes it exactly at any front size. "
+    "Nothing here will approximate it and report the result in the same column as an "
+    "exact value."
+)
 
 # Dimensions handled by a closed form rather than by inclusion--exclusion.
 _ONE_OBJECTIVE = 1
@@ -81,8 +114,8 @@ def non_dominated(values: Fitness) -> npt.NDArray[np.bool_]:
     materialises an ``(n, n, d)`` boolean array. That is fine for a campaign's
     few hundred measurements and impossible for a landscape: CH65's 62,926
     measured variants would ask for roughly 12 GB, so *deriving a reference
-    front from the data that defines it* was the one thing this function could
-    not do. It now sorts once and sweeps:
+    front from the data that defines it* would be out of reach. So it sorts once
+    and sweeps:
 
     #. Deduplicate. `numpy.unique` sorts the rows lexicographically as a side
        effect, and identical rows never dominate each other, so dominance among
@@ -96,8 +129,8 @@ def non_dominated(values: Fitness) -> npt.NDArray[np.bool_]:
        against a later one, and the running front is all that must be kept.
 
     The cost is ``O(n log n · d)`` to sort plus ``O(n · |front| · d)`` to sweep,
-    against ``O(n² · d)`` before, and the memory is a fixed block rather than
-    ``n²``. At 62,926 points and three objectives it is well under a second.
+    against ``O(n² · d)`` for the all-pairs form, and the memory is a fixed
+    block rather than ``n²``.
 
     Args:
         values: An ``(n, n_objectives)`` array of objective values.
@@ -220,8 +253,15 @@ def hypervolume(values: Fitness, reference: npt.ArrayLike) -> float:
     Exactness by dimension:
 
     * one or two objectives -- a sweep, exact, any number of points;
-    * three or more -- inclusion--exclusion over the front, exact, but limited to
-      `MAX_INCLUSION_EXCLUSION_POINTS` non-dominated points.
+    * three or more, up to `MAX_INCLUSION_EXCLUSION_POINTS` points --
+      inclusion--exclusion over the front, exact;
+    * three or more, past that -- pymoo, exact, if the optional `moo` extra is
+      installed; otherwise `NotImplementedError`.
+
+    Every path is exact, so the value does not depend on which one ran. What
+    depends on the extra is whether there is a value at all: see
+    [pymoo_available][evogfn.metrics.pareto.pymoo_available] to ask before
+    computing rather than catching afterwards.
 
     Args:
         values: An ``(n, n_objectives)`` array of objective values.
@@ -236,9 +276,9 @@ def hypervolume(values: Fitness, reference: npt.ArrayLike) -> float:
             contains ``nan``, or if the reference is not a finite point of
             matching width.
         NotImplementedError: If three or more objectives are combined with more
-            than `MAX_INCLUSION_EXCLUSION_POINTS` non-dominated points,
-            where the exact method here becomes intractable. The alternative
-            would be an approximation reported as if it were exact.
+            than `MAX_INCLUSION_EXCLUSION_POINTS` non-dominated points *and*
+            pymoo is not installed, where no exact method here can run. The
+            alternative would be an approximation reported as if it were exact.
     """
     points = _as_objective_matrix(values)
     point = _as_reference_point(reference, points.shape[1])
@@ -255,7 +295,74 @@ def hypervolume(values: Fitness, reference: npt.ArrayLike) -> float:
         return float(front.max() - point[0])
     if n_objectives == _TWO_OBJECTIVES:
         return _hypervolume_2d(front, point)
+    if front.shape[0] > MAX_INCLUSION_EXCLUSION_POINTS:
+        volume = _pymoo_hypervolume(front, point)
+        if volume is None:
+            raise NotImplementedError(_TOO_LARGE.format(k=front.shape[0], d=n_objectives))
+        return volume
     return _hypervolume_inclusion_exclusion(front, point)
+
+
+def pymoo_available() -> bool:
+    """Whether hypervolume can be computed at any front size.
+
+    The built-in exact method stops at `MAX_INCLUSION_EXCLUSION_POINTS` points in
+    three or more objectives; pymoo's does not. A caller deciding whether a
+    hypervolume column will be populated -- a benchmark suite laying out a table,
+    a test asserting the refusal path -- should ask this rather than run the
+    computation and catch, because "no volume" and "not computed" are different
+    answers and only one of them is a result.
+
+    Returns:
+        ``True`` when the optional `moo` extra is installed.
+    """
+    return _pymoo_indicator() is not None
+
+
+@cache
+def _pymoo_indicator() -> Any | None:  # noqa: ANN401 - pymoo ships no type information
+    """Fetch pymoo's exact hypervolume class, or ``None`` when the `moo` extra is absent.
+
+    Imported lazily and cached, for two reasons. The import costs a few hundred
+    milliseconds and pulls in scipy and matplotlib, which nothing else here
+    needs; and a failed import must stay a fallback rather than becoming an
+    error, so that a numpy+torch install keeps working on everything below the
+    front-size limit.
+
+    Returns:
+        The ``HV`` class, or ``None`` if it cannot be imported.
+    """
+    try:
+        from pymoo.indicators.hv import HV  # noqa: PLC0415 - optional, and paid for once
+    except ImportError:
+        return None
+    return HV
+
+
+def _pymoo_hypervolume(
+    front: npt.NDArray[np.float64], reference: npt.NDArray[np.float64]
+) -> float | None:
+    """Exact hypervolume from pymoo, for fronts the built-in method cannot take.
+
+    **The signs are flipped, and that is the whole substance of this function.**
+    Everything in this package maximises; pymoo minimises, so the region it
+    measures is the one *below* its reference point. Negating both the front and
+    the reference maps one convention onto the other exactly -- and getting it
+    wrong does not raise, it returns a plausible number that ranks methods in
+    reverse or, more often, a silent zero.
+
+    Args:
+        front: A ``(k, n_objectives)`` array of non-dominated points, each
+            strictly above ``reference`` on every objective.
+        reference: The ``(n_objectives,)`` reference point.
+
+    Returns:
+        The dominated volume, or ``None`` when pymoo is not installed.
+    """
+    indicator = _pymoo_indicator()
+    if indicator is None:
+        return None
+    return float(indicator(ref_point=-reference)(-front))
 
 
 def r2_indicator(
@@ -433,13 +540,7 @@ def _hypervolume_inclusion_exclusion(
     """
     k = front.shape[0]
     if k > MAX_INCLUSION_EXCLUSION_POINTS:
-        raise NotImplementedError(
-            f"exact hypervolume in {front.shape[1]} objectives is computed here by "
-            f"inclusion-exclusion over the front, which sums 2^k terms and is limited "
-            f"to k = {MAX_INCLUSION_EXCLUSION_POINTS} points; this front has {k}. Use a "
-            f"dedicated implementation (pymoo, BoTorch) for larger fronts rather than "
-            f"an approximation that would not announce itself as one."
-        )
+        raise NotImplementedError(_TOO_LARGE.format(k=k, d=front.shape[1]))
     codes = np.arange(1, 1 << k, dtype=np.int64)
     membership = ((codes[:, None] >> np.arange(k, dtype=np.int64)) & 1).astype(np.bool_)
     # Componentwise minimum over each subset: the corner of the intersected box.

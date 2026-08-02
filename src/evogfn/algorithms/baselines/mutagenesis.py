@@ -68,14 +68,14 @@ def redrawn_until_buildable(
     """Redraw the neighbours the environment cannot build, and report the cost.
 
     A local searcher under a feasibility constraint has a third option between
-    "emit something unbuildable" and "raise". The previous behaviour here was a
-    fourth and worse one: hold the current design wherever the drawn neighbour
-    was illegal. That never raises and never emits an infeasible design, so it
-    reads as safe -- and on a sparse feasible set, where 96% of single
-    substitutions are illegal, it quietly turns a plate of designs into 96
-    copies of one. After the campaign deduplicates, the round measures a single
-    variant. The search looks stalled and the diagnosis "annealing does not move
-    on constrained landscapes" would be a fact about this function.
+    "emit something unbuildable" and "raise". The obvious fourth one is worse:
+    hold the current design wherever the drawn neighbour was illegal. That never
+    raises and never emits an infeasible design, so it reads as safe -- and on a
+    sparse feasible set, where most single substitutions are illegal, it quietly
+    turns a plate of designs into copies of one. After the campaign
+    deduplicates, the round measures a single variant. The search looks stalled
+    and the diagnosis "annealing does not move on constrained landscapes" would
+    be a fact about this function.
 
     Redrawing gives each illegal row fresh positions and tokens instead. The
     feasible neighbours of a feasible design are a small but non-empty set --

@@ -208,13 +208,13 @@ class SimulatedAnnealing(Sampler):
 
         extra = 0
         if self._feasible_only:
-            # Redraw rather than hold position. Holding is what this used to do,
-            # and it costs no proposals precisely because it produces no
-            # designs: on a sparse feasible set almost every single substitution
-            # is illegal, so the round returns a plate of identical copies of
-            # the current design, deduplicates down to one measurement, and the
-            # chain stalls. The redraws are charged for, which is the honest way
-            # to report a constraint that makes proposing expensive.
+            # Redraw rather than hold position. Holding costs no proposals
+            # precisely because it produces no designs: on a sparse feasible
+            # set almost every single substitution is illegal, so the round
+            # returns a plate of identical copies of the current design,
+            # deduplicates down to one measurement, and the chain stalls. The
+            # redraws are charged for, which is the honest way to report a
+            # constraint that makes proposing expensive.
             proposals, extra = redrawn_until_buildable(
                 self._env, self._current, proposals, self._rng, self._max_attempts
             )

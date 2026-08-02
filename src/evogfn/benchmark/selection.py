@@ -29,9 +29,7 @@ The tie-break is not a tidy-up. This project's claim is diverse, feasible,
 high-fitness variants, not just high-fitness ones; a rule that read regret alone
 would happily select a configuration that optimises well and samples badly, and
 the diversity column of the headline table would then have to live with whatever
-that produced. Ties are decided by measurement rather than by preference, and
-they are common: at 30 seeds on the diagnostic landscape, four of five objectives
-sat within 0.02 regret of each other.
+that produced. Ties are decided by measurement rather than by preference.
 
 A tie is *statistical*, not numerical. Two arms tie when a paired comparison
 cannot separate them, which is a statement about the evidence rather than about
@@ -47,7 +45,12 @@ from typing import TYPE_CHECKING, Protocol
 import numpy as np
 
 from evogfn.algorithms.gflownet.objectives import ContrastiveBalance, TrajectoryBalance
-from evogfn.benchmark.methods import genetic_gflownet, gflownet
+from evogfn.benchmark.methods import (
+    DEFAULT_HIDDEN_DIM,
+    DEFAULT_TRAINING_STEPS,
+    genetic_gflownet,
+    gflownet,
+)
 from evogfn.benchmark.statistics import compare
 
 if TYPE_CHECKING:
@@ -118,6 +121,31 @@ def _means(
     return regret, diversity
 
 
+def _separated_on_diversity(
+    records: Mapping[str, Mapping[int, Scored]],
+    seeds: list[int],
+    name: str,
+    reference: str,
+) -> bool:
+    """Whether one arm's diversity beats another's by more than the noise.
+
+    Args:
+        records: Stored records per arm.
+        seeds: The shared seeds, so the comparison is paired.
+        name: The wider arm.
+        reference: The arm it must beat.
+
+    Returns:
+        Whether a paired comparison separates them. Higher is better here,
+        unlike regret.
+    """
+    mine = np.array([records[name][s].diversity for s in seeds], dtype=np.float64)
+    theirs = np.array([records[reference][s].diversity for s in seeds], dtype=np.float64)
+    if not (np.isfinite(mine).all() and np.isfinite(theirs).all()):
+        return False
+    return bool(compare(name, mine, theirs, higher_is_better=True).significant)
+
+
 def select(records: Mapping[str, Mapping[int, Scored]]) -> Selection:
     """Apply the selection rule to a stage's stored results.
 
@@ -171,7 +199,34 @@ def select(records: Mapping[str, Mapping[int, Scored]]) -> Selection:
             diversity=diversity,
         )
 
-    chosen = max(tied, key=lambda name: diversity[name])
+    # The tie-break has to clear the same bar it just applied to regret. Two
+    # arms tied on fitness whose diversity differs by less than the evidence can
+    # resolve have not been separated by diversity either, and picking the
+    # nominally-higher one is discrimination on noise. Without the guard the rule
+    # can hand the choice to an arm that is worse on regret on the strength of a
+    # diversity margin narrower than its own replicate spread.
+    #
+    # A tightening, never a loosening: it can only make the tie-break fire less
+    # often. Where diversity cannot discriminate, the fallback is the leader on
+    # regret, which is where the rule started.
+    widest = max(tied, key=lambda name: diversity[name])
+    if widest != leader and not _separated_on_diversity(records, shared, widest, leader):
+        return Selection(
+            chosen=leader,
+            reason=(
+                f"tied on regret with {len(tied) - 1} other arm(s) over "
+                f"{len(shared)} seeds, and the diversity spread among them "
+                f"({min(diversity[n] for n in tied):.2f} to "
+                f"{max(diversity[n] for n in tied):.2f}) is itself within noise, "
+                f"so the tie-break cannot separate them either; lowest mean "
+                f"regret {regret[leader]:.4f} decides"
+            ),
+            tied=tuple(sorted(tied)),
+            regret=regret,
+            diversity=diversity,
+        )
+
+    chosen = widest
     return Selection(
         chosen=chosen,
         reason=(
@@ -195,20 +250,56 @@ def select(records: Mapping[str, Mapping[int, Scored]]) -> Selection:
 
 
 #: Reward exponents the selection phase scans, once an objective has been
-#: chosen. Wider than `SENSITIVITY_GRID`'s because that grid came back monotone
-#: to its own edge -- 0.502, 0.473, 0.446 across beta 1, 3, 10 -- which cannot
-#: distinguish "10 is right" from "10 is the largest value we offered". These
-#: extend far enough past the default that a monotone result would be a finding
-#: rather than an artefact of where the grid stopped.
-SELECTION_BETAS: tuple[float, ...] = (1.0, 3.0, 10.0, 30.0, 100.0)
+#: chosen. The grid brackets the default from both sides on purpose. A scan
+#: whose best value sits at its own edge cannot distinguish "this exponent is
+#: right" from "this exponent is the largest one offered", so the range has to
+#: reach far enough above the default for regret to turn.
+#:
+#: The values below 1 close the same hole at the other end. Diversity is the
+#: axis the tie-break actually decides on, so a grid floored at 1 cannot say
+#: whether 1 is the optimum or merely the edge. Below 1 the target R(x)^beta
+#: flattens, approaching uniform over the reachable set as beta approaches 0, so
+#: regret has to turn upward somewhere down there; where it turns is the thing
+#: worth knowing.
+#:
+#: Widening a grid is only legitimate under the conditions that hold here: the
+#: rule is fixed before the numbers arrive, the landscape carries no claim, and
+#: the rule is regret-first -- an exponent that buys diversity at a real regret
+#: cost is not eligible, since only statistical ties go to diversity. Widening
+#: until the answer is agreeable would not be legitimate, so this grid is fixed
+#: and the whole curve gets reported either way.
+SELECTION_BETAS: tuple[float, ...] = (0.1, 0.3, 0.5, 1.0, 2.0, 3.0, 10.0, 30.0, 100.0)
 
 
-def _build_objective(name: str, beta: float) -> Methodology:
-    """One arm: the named training objective at the given reward exponent.
+#: Objectives that read a sub-trajectory length weighting. Everything else
+#: ignores one, which is why `_build_objective` refuses rather than accepts it.
+_TAKES_LAM = frozenset({"gfn-subtb"})
+
+
+def _build_objective(
+    name: str,
+    beta: float,
+    steps: int = DEFAULT_TRAINING_STEPS,
+    *,
+    lam: float | None = None,
+    hidden_dim: int = DEFAULT_HIDDEN_DIM,
+) -> Methodology:
+    """One arm: the named training objective at the given hyperparameters.
 
     Args:
         name: An objective from `OBJECTIVES` or `flow_objectives`.
         beta: The reward exponent to build it with.
+        steps: Gradient steps per round.
+        lam: Sub-trajectory balance's weight per unit sub-trajectory length,
+            which is the knob that objective *is*: it interpolates detailed
+            balance as it approaches zero and trajectory balance as it grows,
+            so the objective that won selection is a one-parameter family we
+            have only ever evaluated at one point. ``None`` takes
+            [SubTrajectoryBalance][evogfn.algorithms.gflownet.flow_objectives.SubTrajectoryBalance]'s
+            own default, read from there rather than restated here so the two
+            cannot drift apart while both claim to be the shipped setting.
+        hidden_dim: Width of the policy trunk, passed to every objective because
+            capacity is a property of the policy rather than of the loss.
 
     Returns:
         A methodology.
@@ -217,25 +308,53 @@ def _build_objective(name: str, beta: float) -> Methodology:
         KeyError: If the name is not a known objective. Raised rather than
             defaulted, because a typo that silently produced trajectory balance
             would make a beta scan report the wrong objective's curve.
+        ValueError: If ``lam`` is given for an objective that has no length
+            weighting. Accepting and ignoring it is the worse failure: a scan
+            over ``lam`` would then build one identical arm per value, and a
+            column of identical rows reads as "the weighting does not matter"
+            rather than as "the weighting was never applied".
     """
     from evogfn.algorithms.gflownet.flow_objectives import (  # noqa: PLC0415
+        DEFAULT_LAMBDA,
         DetailedBalance,
         ForwardLookingDetailedBalance,
         SubTrajectoryBalance,
     )
 
+    if lam is not None and name not in _TAKES_LAM:
+        raise ValueError(
+            f"objective {name!r} has no sub-trajectory length weighting, so lam={lam} would "
+            f"be silently dropped; lam applies to {', '.join(sorted(_TAKES_LAM))}"
+        )
+
     if name == "gfn-tb":
-        return gflownet(TrajectoryBalance(), beta=beta)
+        return gflownet(TrajectoryBalance(), beta=beta, steps=steps, hidden_dim=hidden_dim)
     if name == "gfn-contrastive":
-        return gflownet(ContrastiveBalance(prune_threshold=0.1), beta=beta)
+        return gflownet(
+            ContrastiveBalance(prune_threshold=0.1), beta=beta, steps=steps, hidden_dim=hidden_dim
+        )
     if name == "genetic-gfn":
-        return genetic_gflownet(TrajectoryBalance(), beta=beta)
+        return genetic_gflownet(TrajectoryBalance(), beta=beta, steps=steps, hidden_dim=hidden_dim)
     if name == "gfn-db":
-        return gflownet(DetailedBalance(), beta=beta, learn_flow=True)
+        return gflownet(
+            DetailedBalance(), beta=beta, steps=steps, learn_flow=True, hidden_dim=hidden_dim
+        )
     if name == "gfn-subtb":
-        return gflownet(SubTrajectoryBalance(lam=0.9), beta=beta, learn_flow=True)
+        return gflownet(
+            SubTrajectoryBalance(lam=DEFAULT_LAMBDA if lam is None else lam),
+            beta=beta,
+            steps=steps,
+            learn_flow=True,
+            hidden_dim=hidden_dim,
+        )
     if name == "gfn-fldb":
-        return gflownet(ForwardLookingDetailedBalance(), beta=beta, learn_flow=True)
+        return gflownet(
+            ForwardLookingDetailedBalance(),
+            beta=beta,
+            steps=steps,
+            learn_flow=True,
+            hidden_dim=hidden_dim,
+        )
     raise KeyError(f"unknown objective {name!r}")
 
 
@@ -263,4 +382,38 @@ def beta_arms(objective: str) -> dict[str, Methodology]:
     """
     return {
         f"{objective}-beta-{beta:g}": _build_objective(objective, beta) for beta in SELECTION_BETAS
+    }
+
+
+#: Gradient steps per round, scanned once the objective and exponent are fixed.
+#: This is the GFlowNet's *proxy* budget -- steps x batch_size proxy evaluations
+#: per round -- and it is a knob we chose rather than anything the architecture
+#: dictates, so it has to be measured rather than inherited.
+#:
+#: Hyperparameters cannot be assumed to transfer across objectives, so this is
+#: scanned for the objective selection settled on rather than carried over from
+#: a scan run against a different one.
+#:
+#: The values below cluster where the knee plausibly is rather than spanning
+#: orders of magnitude: a grid whose points are an order of magnitude apart
+#: cannot locate a knee sitting between two of them. The question is no longer
+#: "does more help" but "how little is enough". That matters beyond tidiness:
+#: proxy spend is a reported column in the results table, so halving the answer
+#: halves a number the paper prints.
+SELECTION_STEPS: tuple[int, ...] = (50, 100, 150, 200, 300)
+
+
+def steps_arms(objective: str, beta: float) -> dict[str, Methodology]:
+    """The gradient-step scan, once objective and exponent are settled.
+
+    Args:
+        objective: The objective stage A chose.
+        beta: The reward exponent stage B chose.
+
+    Returns:
+        Methodologies by name, one per entry in `SELECTION_STEPS`.
+    """
+    return {
+        f"{objective}-beta-{beta:g}-steps-{steps}": _build_objective(objective, beta, steps)
+        for steps in SELECTION_STEPS
     }

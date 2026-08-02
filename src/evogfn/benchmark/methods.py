@@ -16,9 +16,45 @@ The GFlowNet variants train against a proxy, never the oracle
 
 Each builds a [ProxyLandscape][evogfn.surrogate.proxy.ProxyLandscape] over the
 same surrogate instance the campaign refits, so training costs proxy evaluations
-and never oracle calls. The classical baselines are offered both blind and with
-the same proxy access, because comparing a method that optimises the model
-against one that only meets it as a filter is not a comparison of methods.
+and never oracle calls. The surrogate is *constitutive* of that pipeline -- it
+is what makes a GFlowNet trainable at 384 assays at all -- rather than an extra
+it is being handed.
+
+The baselines are the pipelines their papers describe
+-----------------------------------------------------
+
+Which means bare: no deep ensemble screening their pool, no proxy to optimise
+against, and a candidate pool their own paper would recognise. Handing a
+classical arm all three makes it a hybrid nobody published, and pairing a
+headline number against such an arm compares against something that does not
+exist in the literature. A published simulated annealing has no surrogate; nor
+does published CMA-ES, nor a feasibility-rejecting genetic algorithm, nor MLDE --
+which fits its own kernel ensemble and would otherwise be handed a second model
+to fit predictions to.
+
+What replaces the silent default is a named ladder on one representative
+baseline, `BASELINES`. It answers the attribution question a reviewer will ask
+-- was it the surrogate or the constructive sampler? -- in a decomposition row
+rather than by making the yardstick a hybrid.
+
+Pool size is part of the method
+-------------------------------
+
+A genetic algorithm's pool is its population, and Stanton et al. run population
+== evaluation batch == one plate. CMA-ES's is ``lambda``. Hill climbing and
+annealing propose a neighbourhood of the current point. MLDE's is an exhaustive
+library, deliberately, and it excludes measured designs internally because that
+is its protocol. These differ by three orders of magnitude, so one global
+``max(2048, batch * 4)`` could not be right for more than one of them -- and a
+pool that large always holds enough distinct candidates to fill a plate no
+matter how badly a method has converged, which hides convergence rather than
+reporting it.
+
+A consequence worth naming: `genetic-feasible`'s rejection burden and the
+threshold at which it declares rejection sampling impractical both key on how
+many candidates it is asked for, so its behaviour moves with this. That is the
+point rather than a side effect -- what that arm burns is proposals, and
+proposals are now a property of the method rather than of the harness.
 
 Every methodology can follow a moved anchor
 -------------------------------------------
@@ -53,12 +89,14 @@ any change to this module.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from itertools import count
 from typing import TYPE_CHECKING
 
 import numpy as np
 
 from evogfn.acquisition.rules import Greedy, TopK
+from evogfn.algorithms.base import Sampler
 from evogfn.algorithms.baselines.annealing import SimulatedAnnealing
 from evogfn.algorithms.baselines.cmaes import CMAES
 from evogfn.algorithms.baselines.genetic import GeneticAlgorithm
@@ -79,12 +117,17 @@ from evogfn.surrogate.proxy import ProxyLandscape
 if TYPE_CHECKING:
     import numpy.typing as npt
 
-    from evogfn.algorithms.base import Sampler
     from evogfn.algorithms.gflownet.objectives import GFlowNetObjective
     from evogfn.benchmark.tasks import Task
+    from evogfn.core.types import Fitness, Tokens
 
 #: A methodology turns a task and a seed into a runnable campaign.
 Methodology = Callable[["Task", int], Campaign]
+
+#: A resolved arm setting, in the types a JSON record round-trips unchanged.
+#: Anything richer -- an objective instance, a sampler class -- is recorded by
+#: name, since a record is read back long after the object is gone.
+ArmParameter = str | float | bool
 
 #: Reward exponent. Jain et al. and the MOGFN papers use 3.
 DEFAULT_BETA = 3.0
@@ -92,11 +135,114 @@ DEFAULT_BETA = 3.0
 #: Gradient steps per campaign round. Free in oracle terms, not in wall clock.
 DEFAULT_TRAINING_STEPS = 300
 
-#: Candidates generated per round before selection.
+#: Candidates a *library* method generates per round before selection. This is
+#: MLDE's regime and the regime of any arm whose job is to be screened: there
+#: has to be something for the model to filter, and Wittmann et al.'s protocol
+#: ranks an exhaustive library on purpose. It is not a default for everything:
+#: an arm asks for it by name in `BASELINES`, and everything else gets a plate.
 DEFAULT_POOL = 2048
+
+#: Pool size meaning "exactly the plate this task measures", resolved against
+#: the task's own batch size rather than written as 96. A protocol sweep varies
+#: the plate, and a pool pinned at a literal would stop tracking it -- the arm
+#: would then be a GA whose population is only accidentally its evaluation batch,
+#: which is the one property Stanton et al.'s setting has.
+PLATE_POOL = 0
 
 #: Genetic-GFN's offline mixing ratio, after Jain et al. (2022).
 DEFAULT_MIX = 0.5
+
+#: Width of the policy trunk. Inherited rather than chosen, and it overrides
+#: [SequencePolicy][evogfn.models.policy.SequencePolicy]'s own default of 256.
+#: Named here rather than left as a literal at the two call sites so that the
+#: selection phase can scan it against the value the headline arms actually run
+#: -- a scan whose grid did not contain the shipped setting would report a curve
+#: with the reported configuration missing from it.
+DEFAULT_HIDDEN_DIM = 128
+
+
+#: Trajectories per gradient step. Named rather than repeated as a literal at
+#: the two training call sites because it is the second half of a GFlowNet
+#: arm's proxy budget: a round costs ``steps * TRAINING_BATCH`` proxy
+#: evaluations, so two arms that agree on ``steps`` and disagree on this do not
+#: cost the same, and any comparison between them is confounded by compute.
+TRAINING_BATCH = 64
+
+
+@dataclass(frozen=True)
+class Arm:
+    """A methodology together with the settings it resolved to.
+
+    A methodology is a closure, and a closure says nothing about itself. Two
+    arms built from one factory at two reward exponents are the same code and
+    the same object type; what separates them lives in captured variables that
+    nothing downstream can read. So a stored result could only name its arm,
+    and every question of the form "what did this row run at" became a parse of
+    that name -- which is how a reader of ``beta`` came to be reading a step
+    count, in silence, the day a naming scheme grew a component.
+
+    This carries the answer instead. It is provenance and only provenance: the
+    parameters are written into
+    [RunRecord][evogfn.benchmark.store.RunRecord] and never consulted when
+    deciding whether a cached result may be reused. Staleness stays the code
+    fingerprint's job, on purpose -- a second, configuration-based invalidation
+    rule would be a second thing to be wrong, and being wrong there costs a
+    table that silently mixes runs.
+
+    Being callable rather than owning the call is what keeps it invisible to
+    every caller: `Methodology` is a `Callable`, an instance of this satisfies
+    it, and a plain function still does. A methodology defined outside this
+    module therefore keeps working and simply records nothing, which is the
+    honest reading rather than a gap.
+
+    Attributes:
+        run: The methodology, called unchanged.
+        parameters: What it closed over, by name.
+    """
+
+    run: Methodology
+    parameters: dict[str, ArmParameter]
+
+    def __call__(self, task: Task, seed: int) -> Campaign:
+        """Build the campaign, adding nothing to what the methodology does.
+
+        Args:
+            task: The task to run against.
+            seed: The campaign's seed.
+
+        Returns:
+            The campaign the wrapped methodology builds.
+        """
+        return self.run(task, seed)
+
+
+def _objective_parameters(objective: GFlowNetObjective | None) -> dict[str, ArmParameter]:
+    """How an objective instance describes itself in a stored record.
+
+    ``lam`` is read off the objective rather than taken as an argument because
+    that is where it is resolved: callers hand `gflownet` a constructed
+    objective, so a lambda passed to
+    [SubTrajectoryBalance][evogfn.algorithms.gflownet.flow_objectives.SubTrajectoryBalance]
+    is inside the object by the time this module sees it. Reading it back is
+    what keeps the record describing what ran rather than what was requested.
+
+    Args:
+        objective: The training objective, or ``None`` for the sampler's own
+            default.
+
+    Returns:
+        The objective's name, plus its length weighting where it has one.
+        ``None`` records as ``"default"`` rather than as the name of whatever
+        the sampler currently defaults to: a record must not claim a choice
+        nobody made.
+    """
+    resolved: dict[str, ArmParameter] = {
+        "objective": "default" if objective is None else type(objective).__name__
+    }
+    lam = getattr(objective, "lam", None)
+    if lam is not None:
+        resolved["lam"] = float(lam)
+    return resolved
 
 
 def _anchor_seed(seed: int, generation: int) -> int:
@@ -105,9 +251,8 @@ def _anchor_seed(seed: int, generation: int) -> int:
     A sampler rebuilt from a factory starts from its constructor, which means it
     starts from its seed -- and a sampler re-seeded identically every round
     proposes the identical pool every round. The campaign then deduplicates
-    almost all of it and the campaign stalls: measured directly, a random
-    mutagenesis arm re-proposed its first pool at every anchor and spent rounds
-    two onward on the tail of a batch it had already generated.
+    almost all of it and stalls, spending every round after the first on the
+    tail of a batch it had already generated.
 
     Reproducibility is not given up to fix it. The stream is a pure function of
     the campaign's seed and how many times its anchor has moved, both of which
@@ -120,7 +265,7 @@ def _anchor_seed(seed: int, generation: int) -> int:
     Returns:
         The seed to build the sampler for that anchor with. Generation zero
         returns `seed` unchanged, so a task that never re-anchors is bit-for-bit
-        what it was before the mechanism existed.
+        unaffected by the mechanism.
     """
     if generation == 0:
         return seed
@@ -136,8 +281,7 @@ def _parts(task: Task, seed: int) -> tuple[object, MutationEnvironment, DeepEnse
     The landscape's feasibility rule is handed to the environment, which is what
     makes masked sampling possible at all. Omitting it does not raise: it
     silently switches feasibility-by-construction off, so every proposal scores
-    minus infinity and the surrogate has nothing finite to fit. That is how this
-    was wrong in its first version, and it is the whole of claim C1.
+    minus infinity and the surrogate has nothing finite to fit.
     """
     landscape = task.landscape()
     env = MutationEnvironment(
@@ -166,12 +310,15 @@ def _feasibility_of(landscape: object) -> npt.NDArray[np.floating] | None:
     return None if matrix is None else np.asarray(matrix)
 
 
-def _campaign(
+def _campaign(  # noqa: PLR0913 - a campaign is defined by its protocol
     task: Task,
     landscape: object,
     env: MutationEnvironment,
     build: Callable[[MutationEnvironment], Sampler],
     surrogate: DeepEnsemble | None,
+    *,
+    pool_size: int = DEFAULT_POOL,
+    distinct_batch: bool = False,
 ) -> Campaign:
     """Assemble a campaign under the task's protocol, anchored where it says.
 
@@ -186,6 +333,16 @@ def _campaign(
             it rebuilds come from one place and cannot drift apart.
         surrogate: Model fitted to the measurements, or ``None`` for the
             unassisted ablation.
+        pool_size: Candidates the sampler is asked for per proposal call, or
+            `PLATE_POOL` for exactly the plate. Passed in rather than computed
+            here because it is the method's published population, not a harness
+            setting: one formula over every arm would give a genetic algorithm a
+            pool many times its own population and hand a library method the
+            same number as a hill climber.
+        distinct_batch: Fill the plate with distinct designs rather than with
+            proposals. The plate rule is a method property in exactly the way
+            the pool is, and the arm that sets it exists to measure what the
+            other rule costs.
 
     Returns:
         The campaign, which refuses at construction if the task asks to
@@ -199,30 +356,187 @@ def _campaign(
         selector=TopK(),
         rounds=task.protocol.rounds,
         batch_size=task.protocol.batch_size,
-        pool_size=max(DEFAULT_POOL, task.protocol.batch_size * 4),
+        pool_size=(task.protocol.batch_size if pool_size == PLATE_POOL else pool_size),
+        distinct_batch=distinct_batch,
         environment=env,
         reanchor=task.reanchor,
         sampler_factory=build,
     )
 
 
+def _policy(
+    env: MutationEnvironment, *, hidden_dim: int, learn_flow: bool, seed: int
+) -> SequencePolicy:
+    """A policy sized to an environment's action space.
+
+    One place rather than three, because the sizing is the part that must not
+    drift: a policy whose head is a different width from the environment's
+    action count emits logits for actions that do not exist, and nothing
+    downstream raises.
+
+    Args:
+        env: The environment the policy proposes into. Only its shape is read,
+            and the shape is anchor-independent, so a policy built against one
+            anchor is correctly sized for every other anchor of the same task.
+        hidden_dim: Width of the trunk.
+        learn_flow: Whether to build a flow head.
+        seed: Seeds the initialisation.
+
+    Returns:
+        The policy.
+    """
+    return SequencePolicy(
+        n_actions=env.n_actions,
+        sequence_length=env.sequence_length,
+        n_tokens=env.alphabet.size,
+        hidden_dim=hidden_dim,
+        learn_flow=learn_flow,
+        seed=seed,
+    )
+
+
+class _RebuiltOnMove(Sampler):
+    """A GFlowNet stripped of its ability to follow a moved anchor.
+
+    The rebuild half of the amortisation ablation, and the mechanism is a
+    deliberate omission: the campaign resolves
+    [ReanchorableSampler][evogfn.loop.campaign.ReanchorableSampler] first and
+    falls back to its factory, so a wrapper that does not implement
+    ``reanchored`` is how an arm asks to be rebuilt. Deleting the hook from
+    [GFlowNetSampler][evogfn.algorithms.gflownet.sampler.GFlowNetSampler] would
+    do the same thing to every arm in the suite; hiding it behind a wrapper
+    makes it a property of one arm, which is what an ablation needs it to be.
+
+    What the rebuild discards is the point of the arm. The factory that
+    replaces this builds a *fresh* policy, so the weights the previous anchor
+    trained are gone and the next ball is learned from nothing -- which is the
+    position a genetic algorithm is structurally in, its operator being the
+    same before and after a move.
+
+    What the rebuild must not discard is the accounting. ``proxy_calls`` and
+    the teacher's tallies are campaign totals, and a rebuilt sampler starts
+    them at zero; read off the last one alone they would report the final
+    anchor's rounds as the arm's whole compute, which is exactly the number a
+    reader would use to check that this arm and the carried one cost the same.
+    So the counters are summed over every sampler the factory has built rather
+    than read off the current one.
+
+    Args:
+        inner: The sampler for the current anchor.
+        built: Every sampler the arm's factory has built, this one last. Shared
+            with the factory rather than copied, so a wrapper made now still
+            totals correctly over samplers made later.
+    """
+
+    def __init__(self, inner: GFlowNetSampler, built: list[GFlowNetSampler]) -> None:
+        """Wrap the current sampler without running it."""
+        super().__init__()
+        self._inner = inner
+        self._built = built
+
+    @property
+    def name(self) -> str:
+        """Short label marking that this arm is rebuilt at every move."""
+        return f"{self._inner.name} (rebuilt)"
+
+    @property
+    def inner(self) -> GFlowNetSampler:
+        """The sampler for the current anchor, for inspection."""
+        return self._inner
+
+    @property
+    def proposals_made(self) -> int:
+        """Candidates generated across every anchor this arm has searched."""
+        return sum(sampler.proposals_made for sampler in self._built)
+
+    @property
+    def proxy_calls(self) -> int:
+        """Proxy evaluations spent across every anchor, so compute is comparable."""
+        return sum(sampler.proxy_calls for sampler in self._built)
+
+    @property
+    def bred_designs(self) -> int:
+        """Genetic offspring the policies were asked to construct a path to."""
+        return sum(sampler.bred_designs for sampler in self._built)
+
+    @property
+    def unconstructible_designs(self) -> int:
+        """How many of those had no construction order at all."""
+        return sum(sampler.unconstructible_designs for sampler in self._built)
+
+    @property
+    def unconstructible_fraction(self) -> float:
+        """Share of bred designs no policy could construct.
+
+        Returns:
+            The share in ``[0, 1]``, and ``0.0`` when nothing was bred -- a
+            share of nothing, which is why it is meaningless without
+            `bred_designs` beside it.
+        """
+        bred = self.bred_designs
+        return self.unconstructible_designs / bred if bred else 0.0
+
+    def propose(self, n: int) -> Tokens:
+        """Propose from the current anchor's sampler.
+
+        Args:
+            n: How many candidates to return.
+
+        Returns:
+            An ``(n, sequence_length)`` array.
+        """
+        return self._inner.propose(n)
+
+    def observe(self, sequences: Tokens, values: Fitness) -> None:
+        """Pass measurements through to the current anchor's sampler.
+
+        Args:
+            sequences: The candidates that were measured.
+            values: Their measured objective values.
+        """
+        self._inner.observe(sequences, values)
+
+    def __repr__(self) -> str:
+        """Name the wrapped sampler and how many anchors have been built."""
+        return f"_RebuiltOnMove({self._inner!r}, anchors={len(self._built)})"
+
+
 def classical(
     build: Callable[[MutationEnvironment, int], Sampler],
     *,
-    surrogate: bool = True,
+    surrogate: bool = False,
     proxy_access: bool = False,
+    pool_size: int = PLATE_POOL,
+    distinct_batch: bool = False,
 ) -> Methodology:
-    """A classical baseline, optionally given the same proxy the GFlowNet gets.
+    """A classical baseline, as published or with a named piece added.
+
+    The defaults are the published pipeline: no surrogate, no proxy, and a pool
+    the size of the plate. Defaulting the other way would put a deep ensemble in
+    front of every classical baseline in the suite -- a step in none of their
+    papers -- and make the headline table a comparison between hybrids nobody
+    proposed. So anything beyond the published pipeline is something a caller
+    has to ask for by name, and every arm that asks says so in its own name.
 
     Args:
         build: Makes the sampler from an environment and a seed.
-        surrogate: Whether a surrogate screens the proposal pool.
+        surrogate: Whether a surrogate screens the proposal pool. This is the
+            ``+screen`` rung: the model filters what gets measured and the search
+            itself stays blind.
         proxy_access: Whether the sampler may also *optimise* against the
-            surrogate, as the GFlowNet does. Without this the comparison is
-            between a method that uses the model and one that does not.
+            surrogate, as the GFlowNet does. This is the ``+search`` rung, and it
+            is what separates "the surrogate won" from "the constructive sampler
+            won" -- a real question, and an attribution question, so it belongs
+            to a named ablation rather than to every arm silently.
+        pool_size: Candidates per proposal call, defaulting to one plate. A
+            screened arm needs more than a plate or there is nothing to screen.
+        distinct_batch: Fill the plate with distinct designs rather than with
+            proposals.
 
     Returns:
-        A methodology.
+        A methodology, carrying the settings above so that a record written by
+        it says what it ran at rather than leaving that to be read out of the
+        arm's name.
     """
 
     def methodology(task: Task, seed: int) -> Campaign:
@@ -244,17 +558,46 @@ def classical(
             sampler = build(anchored, _anchor_seed(seed, next(generation)))
             return sampler if proxy is None else ProxyOptimising(sampler, proxy=proxy)
 
-        return _campaign(task, landscape, env, make, ensemble if surrogate else None)
+        return _campaign(
+            task,
+            landscape,
+            env,
+            make,
+            ensemble if surrogate else None,
+            pool_size=pool_size,
+            distinct_batch=distinct_batch,
+        )
 
-    return methodology
+    return Arm(
+        methodology,
+        {
+            "family": "classical",
+            # The sampler by the name of the function that builds it, which is
+            # what separates `genetic` from `genetic-feasible`: same class,
+            # different constructor arguments, and a record naming only the
+            # class could not tell the rejection-sampling arm from the plain
+            # one.
+            "sampler": str(getattr(build, "__name__", "unknown")).strip("_").replace("_", "-"),
+            "surrogate": surrogate,
+            "proxy_access": proxy_access,
+            # As configured, and `PLATE_POOL` is stored as the zero it is: it
+            # means "the task's plate", which is resolved per task and is
+            # therefore already stated by the protocol the record carries.
+            # Resolving it here would need a task this arm has not been handed.
+            "pool_size": pool_size,
+            "distinct_batch": distinct_batch,
+        },
+    )
 
 
-def gflownet(
+def gflownet(  # noqa: PLR0913 - an arm is defined by its hyperparameters
     objective: GFlowNetObjective | None = None,
     *,
     steps: int = DEFAULT_TRAINING_STEPS,
     beta: float = DEFAULT_BETA,
     learn_flow: bool = False,
+    hidden_dim: int = DEFAULT_HIDDEN_DIM,
+    carry_policy: bool = True,
 ) -> Methodology:
     """A GFlowNet trained against the surrogate proxy.
 
@@ -266,46 +609,85 @@ def gflownet(
         learn_flow: Whether to build a flow head. Required by the
             detailed-balance family and useless to the others, so it is set by
             the caller alongside the objective rather than guessed.
+        hidden_dim: Width of the policy trunk. Exposed because it is capacity,
+            and capacity is the one axis where "the default was fine" and "the
+            policy could not represent the target" produce the same flat table:
+            a comparison at a single width cannot tell them apart. Its default
+            is the shipped setting, so leaving it alone changes nothing.
+        carry_policy: Whether the trained weights survive a moved anchor. On is
+            the shipped method and is what *amortisation* means here: the policy
+            arrives at the new ball already knowing something about the
+            landscape. Off rebuilds it from scratch at every move, which is the
+            position a genetic algorithm is structurally in -- its operator is
+            the same before and after the move -- and so is the control the
+            claim needs. It changes nothing on a task whose anchor never moves,
+            because nothing is ever rebuilt there.
 
     Returns:
-        A methodology.
+        A methodology, carrying its settings for the record.
     """
 
     def methodology(task: Task, seed: int) -> Campaign:
         landscape, env, ensemble = _parts(task, seed)
-        # The policy is built once and closed over, so a rebuild for a moved
-        # anchor keeps the trained weights. It survives the move because its
-        # action space -- length * |alphabet| + 1 indices -- and its input, the
-        # state sequence, are both properties of the space rather than of the
-        # anchor. Only the masks move.
-        policy = SequencePolicy(
-            n_actions=env.n_actions,
-            sequence_length=env.sequence_length,
-            n_tokens=env.alphabet.size,
-            hidden_dim=128,
-            learn_flow=learn_flow,
-            seed=seed,
+        # Built once and closed over when the policy is carried, so a rebuild
+        # for a moved anchor keeps the trained weights. It survives the move
+        # because its action space -- length * |alphabet| + 1 indices -- and its
+        # input, the state sequence, are both properties of the space rather
+        # than of the anchor. Only the masks move.
+        carried = (
+            _policy(env, hidden_dim=hidden_dim, learn_flow=learn_flow, seed=seed)
+            if carry_policy
+            else None
         )
         proxy = ProxyLandscape(ensemble, alphabet=env.alphabet, sequence_length=env.sequence_length)
 
         generation = count()
+        built: list[GFlowNetSampler] = []
 
         def make(anchored: MutationEnvironment) -> Sampler:
             """Build the sampler against whichever anchor the campaign is at."""
             stream = _anchor_seed(seed, next(generation))
-            return GFlowNetSampler(
+            # A fresh policy per anchor when nothing is carried, seeded from the
+            # same stream the sampler is. At the opening anchor that stream *is*
+            # the campaign's seed, so the two arms start from identical weights
+            # and diverge only where the anchor moves -- which is the only place
+            # the axis is supposed to act.
+            sampler = GFlowNetSampler(
                 anchored,
-                policy,
+                carried
+                if carried is not None
+                else _policy(anchored, hidden_dim=hidden_dim, learn_flow=learn_flow, seed=stream),
                 proxy=proxy,
                 reward=TemperedReward(beta=beta),
-                config=TrainingConfig(steps=steps, batch_size=64, seed=stream),
+                # Identical whether or not the policy is carried, which is what
+                # makes the two comparable: a round costs `steps` gradient steps
+                # and `steps * TRAINING_BATCH` proxy evaluations either way, and
+                # every round retrains, so an arm that starts each ball from
+                # nothing is given exactly as much compute to recover with.
+                config=TrainingConfig(steps=steps, batch_size=TRAINING_BATCH, seed=stream),
                 objective=objective,
                 seed=stream,
             )
+            if carried is not None:
+                return sampler
+            built.append(sampler)
+            return _RebuiltOnMove(sampler, built)
 
-        return _campaign(task, landscape, env, make, ensemble)
+        return _campaign(task, landscape, env, make, ensemble, pool_size=DEFAULT_POOL)
 
-    return methodology
+    return Arm(
+        methodology,
+        {
+            "family": "gflownet",
+            **_objective_parameters(objective),
+            "steps": steps,
+            "beta": beta,
+            "learn_flow": learn_flow,
+            "hidden_dim": hidden_dim,
+            "pool_size": DEFAULT_POOL,
+            "carry_policy": carry_policy,
+        },
+    )
 
 
 def genetic_gflownet(
@@ -314,13 +696,14 @@ def genetic_gflownet(
     steps: int = DEFAULT_TRAINING_STEPS,
     beta: float = DEFAULT_BETA,
     mix: float = DEFAULT_MIX,
+    hidden_dim: int = DEFAULT_HIDDEN_DIM,
 ) -> Methodology:
     """A GFlowNet taught by a genetic algorithm, after Kim et al. (2024).
 
     The variant most likely to matter here: directed evolution is a genetic
-    algorithm, the Ehrlich benchmark's own baseline is one, and a vanilla
-    GFlowNet trails Mol GA by 58% on PMO. Genetic-GFN closes that by absorbing
-    the GA rather than competing with it.
+    algorithm and the Ehrlich benchmark's own baseline is one, so a method that
+    absorbs the GA into the policy's training signal rather than competing with
+    it is the shape this problem invites.
 
     Args:
         objective: How balance violation is measured.
@@ -331,6 +714,12 @@ def genetic_gflownet(
             -- at zero it is an ordinary GFlowNet and at one the policy only
             ever sees the GA's offspring -- so it is exposed rather than left at
             the config default.
+        hidden_dim: Width of the policy trunk, as in
+            [gflownet][evogfn.benchmark.methods.gflownet]. Kept on the same
+            default so that ``mix = 0`` really is a plain GFlowNet: the `mix`
+            axis brackets its own claim by reducing to `gfn-tb` at zero, and a
+            different width here would quietly make those two arms different
+            methods while the sweep reported them as one axis.
 
     Returns:
         A methodology.
@@ -338,13 +727,7 @@ def genetic_gflownet(
 
     def methodology(task: Task, seed: int) -> Campaign:
         landscape, env, ensemble = _parts(task, seed)
-        policy = SequencePolicy(
-            n_actions=env.n_actions,
-            sequence_length=env.sequence_length,
-            n_tokens=env.alphabet.size,
-            hidden_dim=128,
-            seed=seed,
-        )
+        policy = _policy(env, hidden_dim=hidden_dim, learn_flow=False, seed=seed)
         proxy = ProxyLandscape(ensemble, alphabet=env.alphabet, sequence_length=env.sequence_length)
         generation = count()
 
@@ -363,16 +746,27 @@ def genetic_gflownet(
                 policy,
                 proxy=proxy,
                 reward=TemperedReward(beta=beta),
-                config=TrainingConfig(steps=steps, batch_size=64, seed=stream),
+                config=TrainingConfig(steps=steps, batch_size=TRAINING_BATCH, seed=stream),
                 objective=objective,
                 genetic=GeneticAlgorithm(anchored, seed=stream),
                 genetic_config=GeneticConfig(offspring=64, mix=mix, warmup=max(steps // 10, 1)),
                 seed=stream,
             )
 
-        return _campaign(task, landscape, env, make, ensemble)
+        return _campaign(task, landscape, env, make, ensemble, pool_size=DEFAULT_POOL)
 
-    return methodology
+    return Arm(
+        methodology,
+        {
+            "family": "genetic-gflownet",
+            **_objective_parameters(objective),
+            "steps": steps,
+            "beta": beta,
+            "mix": mix,
+            "hidden_dim": hidden_dim,
+            "pool_size": DEFAULT_POOL,
+        },
+    )
 
 
 def _random(env: MutationEnvironment, seed: int) -> Sampler:
@@ -409,24 +803,65 @@ def _feasible_genetic(env: MutationEnvironment, seed: int) -> Sampler:
     """A genetic algorithm that rejection-samples until its offspring are legal.
 
     The control for the feasibility claim. Where masking is free, rejection
-    sampling costs proposals, and on a sparse feasible set it becomes
-    impractical -- which is itself the result.
+    sampling costs proposals, and what those proposals cost on a sparse feasible
+    set is the quantity this arm exists to expose.
+
+    It is asked for one plate at a time, like the genetic algorithm it is a
+    variant of, so ``max_attempts`` bounds 200 attempts at breeding 96 legal
+    offspring rather than at breeding 2048. The number of proposals it burns per
+    measured design is therefore the method's, not the harness's, which is what
+    the claim needs it to be.
     """
     return GeneticAlgorithm(env, seed=seed, feasible_only=True, max_attempts=200)
 
 
-#: The classical baselines. Directed evolution *is* a genetic algorithm, so
-#: these are the incumbents rather than strawmen to be cleared.
+#: The classical baselines, each as its own paper published it. Directed
+#: evolution *is* a genetic algorithm, so these are the incumbents rather than
+#: strawmen to be cleared -- and an incumbent is a whole pipeline, which is what
+#: a lab chooses between. Every arm here is bare: no surrogate, no proxy, and a
+#: pool the method's own paper would recognise.
+#:
+#: The four ``genetic+`` arms are a **ladder on one representative baseline**
+#: rather than a silent default on all nine. Each rung adds exactly one thing to
+#: the rung above it, so the table reads as a decomposition:
+#:
+#: ===================  =====================================================
+#: arm                  what it adds
+#: ===================  =====================================================
+#: ``genetic``          nothing; the model does not exist
+#: ``genetic+screen``   the model filters the pool; the search stays blind
+#: ``genetic+search``   the sampler optimises against the model
+#: ``genetic+distinct`` the plate is filled with distinct designs
+#: ===================  =====================================================
+#:
+#: ``random+screen`` is the same first rung on the floor, which is what says
+#: whether a screen helps at all or only helps a method that was already
+#: searching. A silent deep ensemble on all nine arms would answer none of
+#: these questions and would make every one of them a hybrid.
 BASELINES: dict[str, Methodology] = {
-    "random": classical(_random, surrogate=False),
-    "random+surrogate": classical(_random),
+    "random": classical(_random),
     "hill-climb": classical(_hill_climb),
     "genetic": classical(_genetic),
-    "genetic+proxy": classical(_genetic, proxy_access=True),
-    "genetic-feasible": classical(_feasible_genetic, proxy_access=True),
-    "annealing": classical(_annealing, proxy_access=True),
-    "cmaes": classical(_cmaes, proxy_access=True),
-    "mlde": classical(_mlde, proxy_access=True),
+    "genetic-feasible": classical(_feasible_genetic),
+    "annealing": classical(_annealing),
+    "cmaes": classical(_cmaes),
+    # MLDE's pool is its library and it excludes measured designs internally --
+    # its published protocol, not a favour from the harness. Shrinking it to a
+    # plate would leave an arm called MLDE that is not MLDE.
+    "mlde": classical(_mlde, pool_size=DEFAULT_POOL),
+    # Ablations. Each keeps the library pool because a screen with nothing to
+    # screen is not a screen: at a pool of one plate the model would rank 96
+    # candidates into 96 wells and change nothing.
+    "random+screen": classical(_random, surrogate=True, pool_size=DEFAULT_POOL),
+    "genetic+screen": classical(_genetic, surrogate=True, pool_size=DEFAULT_POOL),
+    "genetic+search": classical(
+        _genetic, surrogate=True, proxy_access=True, pool_size=DEFAULT_POOL
+    ),
+    # The plate rule rather than the model: same algorithm, same population,
+    # same blindness, and 96 distinct designs instead of 96 proposals. It cannot
+    # be recovered from `genetic`'s ledger, because dropping a repeat changes
+    # which design takes that well and the two campaigns diverge from round one.
+    "genetic+distinct": classical(_genetic, distinct_batch=True),
 }
 
 #: GFlowNet objectives, each behind the same interface. Comparing them is a
@@ -448,6 +883,7 @@ def flow_objectives() -> dict[str, Methodology]:
         Methodologies by name.
     """
     from evogfn.algorithms.gflownet.flow_objectives import (  # noqa: PLC0415
+        DEFAULT_LAMBDA,
         DetailedBalance,
         ForwardLookingDetailedBalance,
         SubTrajectoryBalance,
@@ -455,18 +891,23 @@ def flow_objectives() -> dict[str, Methodology]:
 
     return {
         "gfn-db": gflownet(DetailedBalance(), learn_flow=True),
-        "gfn-subtb": gflownet(SubTrajectoryBalance(lam=0.9), learn_flow=True),
+        # `lam` named from its own module's constant rather than repeated as a
+        # literal here. The selection phase scans this axis and defaults to the
+        # same constant, so the arm the headline runs and the centre of the scan
+        # are the same value by construction; two 0.9s could drift apart and the
+        # resulting scan would report a curve the shipped arm is not on.
+        "gfn-subtb": gflownet(SubTrajectoryBalance(lam=DEFAULT_LAMBDA), learn_flow=True),
         "gfn-fldb": gflownet(ForwardLookingDetailedBalance(), learn_flow=True),
     }
 
 
-#: The GFlowNet settings this project has never measured, and the values to
-#: measure them at. Each was inherited rather than chosen: ``steps`` because 300
-#: ran in acceptable time, ``beta`` from Jain et al. (2022), ``mix`` from
-#: Kim et al.'s (2024) offline ratio. A headline comparison against baselines
-#: tuned to their own papers, run at settings nobody tuned, measures the
-#: settings -- so what this grid is for is establishing that the reported
-#: configuration is not a bad one, and saying by how much it could be beaten.
+#: The GFlowNet settings this project inherited rather than chose, and the
+#: values to measure them at: ``steps`` from what runs in acceptable time,
+#: ``beta`` from Jain et al. (2022), ``mix`` from Kim et al.'s (2024) offline
+#: ratio. A headline comparison against baselines tuned to their own papers, run
+#: at settings nobody tuned, measures the settings -- so what this grid is for is
+#: establishing that the reported configuration is not a bad one, and saying by
+#: how much it could be beaten.
 #:
 #: Values bracket each default above and below rather than extending in one
 #: direction, so a monotone column is legible as "the grid is too narrow" rather
@@ -511,6 +952,44 @@ def sensitivity() -> dict[str, Methodology]:
                 # itself, which brackets the claim that the hybrid beats both.
                 arms[name] = genetic_gflownet(TrajectoryBalance(), mix=value)
     return arms
+
+
+def anchor_arms() -> dict[str, Methodology]:
+    """The three arms of the anchor mechanism study.
+
+    Two of the names are taken out of the tables the suite already runs rather
+    than rebuilt here, and that is deliberate: the store keys on ``(task,
+    arm)``, so an arm re-declared under the same name from a second expression
+    would be the same cell only for as long as the two expressions agreed.
+    Looked up, they cannot disagree, and a cell the suite has already paid for
+    stays paid for.
+
+    ``gfn-tb-rebuilt`` differs from ``gfn-tb`` in exactly one argument.
+    Everything else -- the objective, the reward exponent, the gradient steps
+    per round, the trunk width, the candidate pool -- is left at the default the
+    other arm also takes, so the two cannot drift apart in anything that costs
+    compute. That matters more here than anywhere else in the suite: every round
+    retrains regardless, so both arms spend ``rounds * steps`` gradient steps
+    and ``rounds * steps * TRAINING_BATCH`` proxy evaluations, and the rebuilt
+    arm is therefore losing or winning on transfer rather than on budget. An arm
+    that started each ball from nothing *and* got fewer steps to recover with
+    would measure the two together.
+
+    Plain trajectory balance rather than the genetic hybrid, because the hybrid
+    would move two mechanisms at once: its teacher is re-founded at every anchor
+    in both arms by design -- a population bred around the old parent can sit
+    wholly outside the new mutation budget -- so a rebuilt Genetic-GFN would
+    differ from a carried one in the policy while both had already discarded the
+    teacher.
+
+    Returns:
+        Methodologies by name.
+    """
+    return {
+        "gfn-tb": OBJECTIVES["gfn-tb"],
+        "gfn-tb-rebuilt": gflownet(TrajectoryBalance(), carry_policy=False),
+        "genetic": BASELINES["genetic"],
+    }
 
 
 def default_methodologies() -> dict[str, Methodology]:

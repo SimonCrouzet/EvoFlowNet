@@ -6,18 +6,33 @@ literature puts a realistic total in the hundreds -- so a result reported at
 20,000 evaluations is not a result about directed evolution. The ledger exists
 so that the number every claim is indexed by cannot be quietly wrong.
 
-Four counts are kept separate because they diverge, and the gaps are the
+Five counts are kept separate because they diverge, and the gaps are the
 interesting part:
 
 * **proposals** -- candidates the sampler generated. Free. A rejection-sampling
   baseline under a feasibility constraint can generate ten times what it keeps,
   and reporting only oracle calls would hide that entirely.
-* **screened** -- proposals that survived deduplication and reached the
-  selector. A sampler that has collapsed onto one mode re-proposes what it has
-  already measured, and the gap from proposals to screened is where that shows.
+* **screened** -- proposals that survived the campaign's memory of earlier
+  rounds and reached the selector. A sampler that has collapsed onto one mode
+  re-proposes what it has already measured, and the gap from proposals to
+  screened is where that shows.
 * **evaluated** -- oracle calls charged. The constrained resource.
+* **duplicates** -- of those evaluated, how many repeated a design already on
+  the same plate. Charged like any other well, because they are.
 * **feasible** -- of those evaluated, how many the landscape could actually
   build.
+
+Repeats within a plate are the method's cost, repeats across plates are not
+------------------------------------------------------------------------------
+
+A genetic algorithm that breeds 96 offspring of which 10 are identical has
+consumed 96 wells for 86 distinct data points, and that is the price of its own
+convergence -- it belongs to the method and is reported as ``duplicates``. A
+method re-proposing something measured *three rounds ago* is a different
+situation: the point of running rounds is that each one is informed by what the
+last measured, so the campaign remembers and does not re-order. Folding the two
+into one number would report a method that never repeats itself as wasteful
+merely for having searched somewhere it had already been.
 
 Infeasible designs are charged
 ------------------------------
@@ -80,10 +95,16 @@ class RoundRecord:
     Attributes:
         index: Zero-based round number. Round 0 is the initial design, which is
             charged like any other -- seed data is not free.
-        proposed: Candidates the sampler generated.
-        screened: Proposals that reached the selector after deduplication.
+        proposed: Candidates the sampler generated, across every proposal call
+            the round needed to fill its plate.
+        screened: Proposals that reached the selector -- those the campaign had
+            not already measured in an earlier round.
         evaluated: Oracle calls charged this round.
         feasible: How many of the evaluated candidates were constructible.
+        duplicates: How many of the evaluated candidates repeated a design
+            already on the same plate. Zero for a campaign filling its plate
+            with distinct designs, and zero for a sampler that does not repeat
+            itself; anything else is the wells convergence cost.
         best_in_round: Best objective value measured this round. With more than
             one objective this is the best *scalarised* value, under the
             trade-off the campaign's acquisition rule states -- the same one the
@@ -132,11 +153,23 @@ class RoundRecord:
     hypervolume: float = float("nan")
     anchor: tuple[int, ...] | None = None
     anchor_distance: int = 0
+    duplicates: int = 0
 
     @property
     def feasible_fraction(self) -> float:
         """Share of the round's oracle calls spent on constructible designs."""
         return self.feasible / self.evaluated if self.evaluated else 0.0
+
+    @property
+    def duplicate_fraction(self) -> float:
+        """Share of the round's oracle calls spent re-measuring its own plate.
+
+        Zero means every well held a design the round had not already put on
+        that plate. It rises as a method converges, which is the point of
+        reporting it: convergence looks like an improving best-so-far and costs
+        wells, and this is the only place that cost is visible.
+        """
+        return self.duplicates / self.evaluated if self.evaluated else 0.0
 
     @property
     def rejection_ratio(self) -> float:
@@ -238,6 +271,23 @@ class CampaignResult:
         """Share of the whole budget spent on constructible designs."""
         calls = self.oracle_calls
         return sum(r.feasible for r in self.rounds) / calls if calls else 0.0
+
+    @property
+    def duplicate_fraction(self) -> float:
+        """Mean over rounds of the wells each spent repeating its own plate.
+
+        Averaged over rounds rather than pooled over wells so that a campaign
+        whose plates are all the same size -- which is every campaign here --
+        weights each round equally, and so that the number reads as "what a
+        typical plate of this method looks like" rather than as a total that
+        grows with the budget.
+
+        Returns:
+            A share in ``[0, 1]``, and ``0.0`` for a campaign with no rounds.
+        """
+        if not self.rounds:
+            return 0.0
+        return float(np.mean([record.duplicate_fraction for record in self.rounds]))
 
     @property
     def pareto_front(self) -> Fitness:
@@ -379,6 +429,7 @@ class CampaignResult:
         if not self.is_multi_objective:
             metrics["best_value"] = self.best_value
         metrics["feasible_fraction"] = self.feasible_fraction
+        metrics["duplicate_fraction"] = self.duplicate_fraction
         metrics["rounds"] = float(len(self.rounds))
         if (regret := self.simple_regret) is not None:
             metrics["simple_regret"] = regret
