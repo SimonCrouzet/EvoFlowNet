@@ -1,11 +1,11 @@
 """The genetic algorithm: the baseline this project has to beat.
 
 Directed evolution *is* a genetic algorithm, so this is not a strawman to clear
-but the incumbent. Two results make that concrete. On PMO -- the field's own
-sample-efficiency benchmark -- a vanilla GFlowNet scores 9.93 against Mol GA's
-15.69, a ~58% deficit, and the GFlowNet only overtakes it (16.21) by absorbing a
-GA. And the Ehrlich functions this package benchmarks on were introduced with a
-tuned GA as their baseline and no GFlowNet evaluated at all.
+but the incumbent. Two things make that concrete. On PMO -- the field's own
+sample-efficiency benchmark -- a vanilla GFlowNet trails Mol GA, and overtakes
+it only by absorbing a GA. And the Ehrlich functions this package benchmarks on
+were introduced with a tuned GA as their baseline and no GFlowNet evaluated at
+all.
 
 Defaults follow Stanton et al.'s reported settings -- ``p_m = 1/L``,
 ``p_r = 1/L`` -- and holo-bench's ``DiscreteEvolution``, so the comparison is
@@ -64,12 +64,10 @@ class GeneticAlgorithm(Sampler):
         carry_population: Keep the population when the campaign moves the
             anchor, re-projected onto the new mutation budget, rather than
             founding a fresh one on the new anchor. On by default because it is
-            what genuinely transfers, but the choice is a real one and the
-            measurement is in
-            [reanchored][evogfn.algorithms.baselines.genetic.GeneticAlgorithm.reanchored]:
-            carrying wins decisively at a realistic per-round budget and loses
-            decisively at a loose one, because a rebuild is a restart at the
-            best design rather than a neutral act of forgetting.
+            what genuinely transfers, but the choice is a real one: a rebuild is
+            a restart at the best design rather than a neutral act of
+            forgetting. See
+            [reanchored][evogfn.algorithms.baselines.genetic.GeneticAlgorithm.reanchored].
         feasible_only: Resample offspring until constructible. The control for
             the feasibility claim; see the module docstring.
         max_attempts: Resampling rounds before giving up when
@@ -155,42 +153,20 @@ class GeneticAlgorithm(Sampler):
         [carried_fitness][evogfn.algorithms.baselines.genetic.GeneticAlgorithm.carried_fitness]
         reports how many that was.
 
-        Whether carrying is *better* is a measured question, and the answer is
-        not one thing
-        ------------------------------------------------------------------------
-
-        Do not read this method as an improvement to be assumed. Against a GA
-        rebuilt at the new anchor over six rounds of 96 on a continuous
-        additive-plus-pairwise landscape at ``L = 64``, paired on 25 seeds:
-
-        | per-round budget | carrying, against a rebuild | seeds better |
-        | ---------------- | --------------------------- | ------------ |
-        | 2 of 64          | **+15.2 +- 1.3**            | 25 / 25      |
-        | 4 of 64          | **+12.5 +- 1.8**            | 23 / 25      |
-        | 8 of 64          | -1.3 +- 2.3                 | 12 / 25      |
-        | 62 of 64         | **-7.9 +- 1.5**             | 3 / 25       |
-
-        At a realistic directed-evolution budget -- two to four substitutions a
-        round -- carrying wins on essentially every seed, and by a lot. At a
-        loose budget it *loses*, by a lot. The reason is that a rebuild is not
-        the neutral act of forgetting it looks like: the founding population is
-        ``population_size`` copies of the new anchor, so rebuilding is a
-        **restart at the best design measured**, with the population collapsed
-        onto it. On a loose ball that is a strong exploitation move and beats
-        carrying a diverse population around. On a tight ball it destroys the
-        only diversity the search had, and the collapsed population cannot
-        rebuild it inside one round's budget.
-
-        Which is why ``carry_population`` exists rather than this being wired
-        shut. The rebuild behaviour stays reachable *through this method*, so a
-        caller choosing it still gets the random stream carried across the move
-        -- the campaign's own factory fallback rebuilds at the original seed and
-        therefore re-proposes designs the campaign has already measured.
-
-        On this repository's Ehrlich tasks the question is close to moot for a
-        different reason: the value scale is coarse enough that ``best_so_far``
-        improves 0.4 times per four-round campaign, so the anchor rarely moves
-        at all and 30 of 40 seeds finish identically either way.
+        **A rebuild is not the neutral act of forgetting it looks like.** Do not
+        read this method as an improvement to be assumed. The founding
+        population is ``population_size`` copies of the new anchor, so
+        rebuilding is a **restart at the best design measured**, with the
+        population collapsed onto it. On a loose ball that is a strong
+        exploitation move. On a tight ball it destroys the only diversity the
+        search had, and the collapsed population cannot rebuild it inside one
+        round's budget. Which of the two is right therefore depends on the
+        per-round budget, and is why ``carry_population`` exists rather than
+        this being wired shut. The rebuild behaviour stays reachable *through
+        this method*, so a caller choosing it still gets the random stream
+        carried across the move -- the campaign's own factory fallback rebuilds
+        at the original seed and therefore re-proposes designs the campaign has
+        already measured.
 
         Args:
             env: The re-anchored environment.

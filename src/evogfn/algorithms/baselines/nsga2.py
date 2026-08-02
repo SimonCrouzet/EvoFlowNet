@@ -288,10 +288,9 @@ class NSGA2(Sampler):
         carry_population: Keep the population, its objective vectors and its
             fronts when the campaign moves the anchor, rather than founding a
             fresh one on the new anchor. On by default; the trade is the one
-            measured for
-            [GeneticAlgorithm][evogfn.algorithms.baselines.genetic.GeneticAlgorithm.reanchored],
-            and it is why the rebuild stays reachable through the hook rather
-            than only through the campaign's factory fallback.
+            [GeneticAlgorithm][evogfn.algorithms.baselines.genetic.GeneticAlgorithm.reanchored]
+            describes, and it is why the rebuild stays reachable through the
+            hook rather than only through the campaign's factory fallback.
         feasible_only: Resample offspring until constructible, rather than
             projecting them back into the graph. The control for the feasibility
             claim; see

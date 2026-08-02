@@ -32,13 +32,18 @@ import numpy as np
 import pytest
 
 from evogfn.benchmark.attainable import attainable_optimum, reanchored_attainable
-from evogfn.benchmark.methods import BASELINES
+from evogfn.benchmark.methods import BASELINES, OBJECTIVES, anchor_arms
 from evogfn.benchmark.protocol import Protocol
 from evogfn.benchmark.store import ResultStore
 from evogfn.benchmark.suite import (
     CAPPED,
+    CONSTRAINT_DENSITIES,
+    DIAGNOSTIC_DENSITY,
     MAIN,
+    anchor_study,
     budget_gradient,
+    constraint_density,
+    fixed_anchor_task,
     objective_task,
     rounds_curve,
     run_task,
@@ -320,6 +325,40 @@ def test_an_arm_at_the_attainable_optimum_has_no_regret_left(tmp_path):
     assert record.regret <= 0.0
 
 
+def test_a_real_campaign_stores_what_it_cost(tmp_path):
+    """Guards a cost column that is present in the schema and empty in the data.
+
+    Both clocks default to zero, which is what makes an old record loadable and
+    what makes a field nobody wired up indistinguishable from a free campaign.
+    So this runs an actual campaign rather than stamping a record by hand: the
+    only thing it can pass on is `run_task` measuring and passing the numbers
+    through.
+    """
+    record = stored(tmp_path, toy_task(reanchor=True, attainable=None))
+
+    assert record.cpu_seconds > 0.0
+    assert record.wall_seconds > 0.0
+    # Elapsed time is the outer bound: processor time is measured inside it, and
+    # can only exceed it if the campaign ran threads in parallel, which the toy
+    # does not. Reversed would mean the two clocks had been swapped -- which no
+    # single-clock check could catch, and which would make the comparable figure
+    # the contended one.
+    assert record.cpu_seconds <= record.wall_seconds + 1e-6
+
+
+def test_a_campaign_that_reports_no_duplicates_stores_a_zero_share(tmp_path):
+    """Guards the duplicate share landing as `None` or `nan` rather than absent.
+
+    The number is read off the campaign result by attribute, so an arm running
+    against a campaign that does not report it must store a plain zero: a share
+    of nothing, which is the honest reading and is comparable down the column.
+    """
+    record = stored(tmp_path, toy_task(reanchor=True, attainable=None))
+
+    assert record.duplicate_fraction is not None
+    assert 0.0 <= record.duplicate_fraction <= 1.0
+
+
 def test_an_unaudited_task_stores_no_regret(tmp_path):
     # Absence rather than a plausible wrong number: a regret against an
     # unaudited optimum is indistinguishable from a real one once stored.
@@ -337,3 +376,183 @@ def test_the_stored_provenance_names_the_radius_and_the_anchor_rule(tmp_path):
     assert "fixed anchor" in fixed.protocol
     assert "4/round" in moved.protocol
     assert moved.protocol != fixed.protocol
+
+
+# --------------------------------------------------------------------------
+# The diagnostics that vary constructibility and the anchor rule, and above
+# all the cells they must not define twice.
+# --------------------------------------------------------------------------
+
+
+def permitted_share(task):
+    """Fraction of token pairs this task's landscape allows to be adjacent."""
+    return float((task.landscape().transition_matrix > 0).mean())
+
+
+def instance_shape(task):
+    """Everything about a task's Ehrlich instance except its constraint."""
+    landscape = task.landscape()
+    return (
+        landscape.sequence_length,
+        landscape.alphabet.size,
+        landscape.n_motifs,
+        landscape.motif_length,
+        landscape.quantization,
+    )
+
+
+def unwrapped(arm):
+    """An arm's methodology as a bare callable, declaring nothing about itself."""
+    return arm.run
+
+
+def test_the_density_sweep_reuses_the_task_it_already_defines():
+    # The failure this exists for costs compute twice and then hides it: the
+    # store keys on (task, arm), so a rung defined as a renamed copy of an
+    # existing task runs every one of its campaigns again and files them where
+    # nothing compares them to the originals. The rung at the shared
+    # diagnostic's own density has to *be* that task, object for object.
+    rungs = {task.name: task for task in constraint_density()}
+    shared = objective_task()
+
+    assert shared.name in rungs, (
+        f"the density sweep defines {sorted(rungs)} and none of them is {shared.name}, "
+        f"so the rung at density {DIAGNOSTIC_DENSITY} is a twin of a task that already exists"
+    )
+    reused = rungs[shared.name]
+    assert repr(reused) == repr(shared)
+    assert reused.attainable == shared.attainable
+    assert reused.build is shared.build
+
+
+def test_every_density_rung_varies_the_density_and_nothing_else():
+    # A sweep whose rungs differ in a second parameter is not measuring its own
+    # axis, and nothing downstream could tell: every rung would still produce a
+    # number, and the curve through them would still look like a curve.
+    tasks = constraint_density()
+
+    assert len({instance_shape(task) for task in tasks}) == 1
+    assert {repr(task.protocol) for task in tasks} == {repr(objective_task().protocol)}
+    assert {task.max_mutations for task in tasks} == {objective_task().max_mutations}
+    assert {task.reanchor for task in tasks} == {True}
+
+
+def test_the_density_rungs_run_from_the_sparsest_to_no_constraint_at_all():
+    # The top rung is the axis's own control: with every adjacency permitted
+    # nothing bred can fail to be constructible, so a non-zero share measured
+    # there is a fault in the measurement rather than a property of a landscape.
+    # Without it a small share elsewhere cannot be told from a small bug.
+    shares = [permitted_share(task) for task in constraint_density()]
+
+    assert shares == sorted(shares)
+    assert shares[-1] == 1.0
+    assert shares[0] < shares[-1]
+    assert list(CONSTRAINT_DENSITIES) == sorted(CONSTRAINT_DENSITIES)
+
+
+def test_the_density_rungs_the_audit_does_not_cover_declare_nothing():
+    # Copying the shared diagnostic's audited value across would be the failure
+    # the attainable mechanism exists to prevent: lowering the density shrinks
+    # the reachable set, so that value is a target the sparser rungs cannot
+    # reach, and every regret stored on them would carry a floor no method could
+    # clear and no method caused.
+    shared = objective_task()
+    for task in constraint_density():
+        if task.name == shared.name:
+            assert task.attainable is not None
+        else:
+            assert task.attainable is None, (
+                f"{task.name} declares an attainable optimum nobody audited at its density"
+            )
+
+
+def test_the_fixed_anchor_control_is_the_diagnostic_task_with_one_thing_changed():
+    # A control that differs in two things controls for neither. The anchor rule
+    # is the axis; the instance, the protocol and the radius are held.
+    fixed = fixed_anchor_task()
+    moved = objective_task()
+
+    assert fixed.build is moved.build
+    assert fixed.protocol is moved.protocol
+    assert fixed.max_mutations == moved.max_mutations
+    assert moved.reanchor
+    assert not fixed.reanchor
+    assert fixed.name != moved.name
+    # And no regret, because `DIAGNOSTIC_ATTAINABLE` is what four *re-anchored*
+    # rounds reach. Stored against a fixed anchor it would report the difference
+    # between two reachable sets as this arm's shortfall.
+    assert fixed.attainable is None
+    assert fixed.search_budget == fixed.max_mutations
+
+
+def test_no_two_cells_of_the_anchor_study_name_the_same_key():
+    # (task, arm) is the store's key. Two cells sharing one are one cell running
+    # twice, and the second write silently replaces the first.
+    keys = [(cell.task.name, cell.arm) for cell in anchor_study()]
+
+    assert len(set(keys)) == len(keys)
+
+
+def test_the_anchor_study_reuses_the_shipped_cell_rather_than_renaming_it():
+    # The re-anchored, policy-carrying cell is the shipped configuration and has
+    # already been run. Declaring it under a new task or arm name would buy a
+    # second copy of it and leave the two uncheckable against each other.
+    cells = {(cell.task.name, cell.arm): cell for cell in anchor_study()}
+    shipped = (objective_task().name, "gfn-tb")
+
+    assert shipped in cells
+    assert cells[shipped].moves_anchor
+    assert cells[shipped].carries_policy is True
+    assert set(anchor_arms()) >= {cell.arm for cell in anchor_study()}
+    # The arms are the suite's own objects, not re-declarations of them.
+    assert anchor_arms()["gfn-tb"] is OBJECTIVES["gfn-tb"]
+    assert anchor_arms()["genetic"] is BASELINES["genetic"]
+
+
+def test_the_fixed_anchor_row_carries_one_gflownet_cell():
+    # Carrying and rebuilding differ only in what happens when the anchor moves,
+    # and it never moves here, so a second GFlowNet cell on this row would store
+    # one campaign under two arm names -- the twin the study is arranged to
+    # avoid, in the row where it is hardest to notice.
+    fixed = [cell for cell in anchor_study() if not cell.moves_anchor]
+
+    assert sorted(cell.arm for cell in fixed) == ["genetic", "gfn-tb"]
+    assert all(cell.carries_policy is None for cell in fixed)
+
+
+def test_both_axes_of_the_anchor_study_are_actually_varied():
+    # Two orthogonal mechanisms, and a study missing either row answers a
+    # different question: without the fixed-anchor row, "carrying helps" cannot
+    # be told from "carrying helps *because* the ball moved"; without the
+    # baseline, re-anchoring's effect cannot be told from a property of the
+    # protocol that every method shares.
+    cells = anchor_study()
+
+    assert {cell.moves_anchor for cell in cells} == {True, False}
+    assert {cell.carries_policy for cell in cells if cell.moves_anchor} == {True, False, None}
+    assert {cell.arm for cell in cells} >= {"genetic"}
+
+
+def test_a_real_campaign_stores_the_settings_its_arm_resolved_to(tmp_path):
+    """Guards a provenance column that is in the schema and empty in the data.
+
+    The mapping is read off the methodology by attribute, so an arm that
+    declares nothing and an arm whose settings never reach the record are
+    indistinguishable once stored -- and the whole point of the field is to stop
+    a later reader parsing the arm's name for what it ran at.
+    """
+    record = stored(tmp_path, toy_task(reanchor=True, attainable=None))
+
+    assert record.parameters["family"] == "classical"
+    assert record.parameters["sampler"] == "random"
+    assert record.parameters["surrogate"] is False
+
+
+def test_a_methodology_that_states_no_settings_stores_an_empty_mapping(tmp_path):
+    # A plain callable declares nothing, and the record says so rather than
+    # inventing a configuration for a closure nobody can see into.
+    store = ResultStore(tmp_path)
+    task = toy_task(reanchor=True, attainable=None)
+    run_task(task, {"anonymous": unwrapped(BASELINES["random"])}, store, [0], report=lambda _: None)
+
+    assert store.load(task.name, "anonymous")[0].parameters == {}

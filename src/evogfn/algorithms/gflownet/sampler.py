@@ -29,6 +29,20 @@ the surrogate is unfitted. The policy samples from its initialisation, which
 under a masked environment is close to uniform over the *feasible* set. That is
 not a fallback -- it is the feasibility-by-construction property doing its work
 before any model exists, and it is the fairest possible seed design.
+
+Following the campaign's anchor
+-------------------------------
+
+A campaign re-anchors between rounds, and a sampler either says what should
+happen to its own state or is rebuilt from a factory. The rebuild is correct
+here -- the factory closes over the same policy, so the weights survive -- but it
+is not free: it restarts the sampler's own accounting, so a ``proxy_calls`` read
+off the campaign afterwards counts the last anchor's rounds rather than the
+campaign's, understating the method's compute by roughly the number of times it
+moved. That is a number reported next to the oracle budget, and undercounting it
+would flatter exactly the method under test.
+[reanchored][evogfn.algorithms.gflownet.sampler.GFlowNetSampler.reanchored] is
+what makes the campaign prefer the informed path instead.
 """
 
 from __future__ import annotations
@@ -50,6 +64,7 @@ if TYPE_CHECKING:
     from evogfn.algorithms.gflownet.objectives import GFlowNetObjective
     from evogfn.core.types import Tokens
     from evogfn.env.base import SequenceEnvironment
+    from evogfn.env.mutation import MutationEnvironment
     from evogfn.models.policy import SequencePolicy
     from evogfn.rewards.base import Reward
     from evogfn.surrogate.proxy import ProxyLandscape
@@ -72,9 +87,8 @@ class GFlowNetSampler(Sampler):
             [train_genetic_gfn][evogfn.algorithms.gflownet.genetic_gfn.train_genetic_gfn]
             -- the GA recombines the best of a rank-based buffer and its
             offspring are replayed into the training batch. Kim et al. report
-            this closing a 58% deficit against Mol GA on PMO, and directed
-            evolution *is* a genetic algorithm, so it is the variant most likely
-            to matter here.
+            this closing the gap to Mol GA on PMO, and directed evolution *is* a
+            genetic algorithm, so it is the variant most likely to matter here.
         genetic_config: How much guidance to apply. Ignored without ``genetic``.
         seed: Seeds proposal sampling, independently of training.
     """
@@ -106,6 +120,8 @@ class GFlowNetSampler(Sampler):
         self._seed = seed
         self._rounds_trained = 0
         self._proxy_calls = 0
+        self._bred_designs = 0
+        self._unconstructible_designs = 0
 
     @property
     def name(self) -> str:
@@ -129,6 +145,165 @@ class GFlowNetSampler(Sampler):
         """
         return self._proxy_calls
 
+    @property
+    def bred_designs(self) -> int:
+        """Genetic offspring the policy was asked to construct a path to.
+
+        A campaign total, and zero without a genetic teacher -- nothing was
+        bred, so nothing could fail to be built. That is a statement about the
+        configuration rather than a measurement, which is why the share below
+        must never be read without this beside it.
+        """
+        return self._bred_designs
+
+    @property
+    def unconstructible_designs(self) -> int:
+        """How many of those the policy had no way to construct.
+
+        Each was feasible and inside the mutation budget -- ``is_reachable``
+        admits it -- and yet every ordering of its mutations passes through a
+        state the environment forbids, so no trajectory of this graph ends
+        there and replay could return no path.
+        """
+        return self._unconstructible_designs
+
+    @property
+    def unconstructible_fraction(self) -> float:
+        """Share of bred designs the policy could not construct.
+
+        The feasible-but-unreachable gap measured on designs a run actually
+        produced, rather than by enumerating a toy instance. It is a property of
+        the landscape's constraint and not of this sampler, which is what makes
+        it worth storing rather than logging.
+
+        Returns:
+            The share in ``[0, 1]``, and ``0.0`` when nothing was bred. A share
+            alone cannot distinguish those two cases, so read it with
+            `bred_designs`.
+        """
+        if not self._bred_designs:
+            return 0.0
+        return self._unconstructible_designs / self._bred_designs
+
+    def reanchored(self, env: MutationEnvironment) -> GFlowNetSampler:
+        """Carry the policy, the random stream and the accounting to ``env``.
+
+        **The policy survives, and the reason is structural rather than
+        convenient.** An action index below ``length * |alphabet|`` means "set
+        position ``a // |alphabet|`` to token ``a % |alphabet|``", and the
+        network's input is the state sequence itself. Neither the action layout
+        nor the input mentions the parent, so a policy that has learned "token 1
+        at position 3 earns reward" has learned something about the landscape and
+        not about the anchor. What is anchored is only the **masks** -- which
+        actions are legal from a state, and how much budget is left -- and those
+        are read from ``env`` on every step rather than stored. So the weights
+        transfer intact, and the object is shared rather than copied: training
+        already mutates it in place across rounds, and the campaign's factory
+        fallback closes over the same instance, so copying here would introduce a
+        second set of weights that no other path has.
+
+        **``log Z`` is the one anchor-relative parameter, and it is carried
+        deliberately.** It estimates the total flow through the DAG -- the
+        partition function of the reward over the reachable set -- and the
+        reachable set is precisely what moved, so the carried value is stale by
+        construction. It is kept anyway: ``log Z`` enters the loss and never the
+        forward distribution, so a stale value biases nothing that gets proposed;
+        it is a single scalar carrying the learning rate an order of magnitude
+        above the policy's, which is what re-converges it inside the next
+        retrain; and the reward *scale* largely transfers across a move, so the
+        stale estimate is a better starting point than a reset. What it must not
+        be is *read* as the new ball's partition function before that retrain.
+
+        **The accounting survives, which is the failure this hook exists for.**
+        ``proxy_calls`` is a campaign total: restarting it at each anchor would
+        report the last anchor's rounds as the arm's whole compute, and it is a
+        printed column beside the oracle budget, so the undercount would land in
+        the results table as a cost this method did not pay. The bred and
+        unconstructible counts are carried for a sharper version of the same
+        reason: the reachability gap is a property of the *ball being searched*,
+        so a move is exactly when it changes, and a count restarted at each
+        anchor would report the last ball's gap as the campaign's. ``rounds_trained``
+        matters twice over -- it is the reported round count, and it is the
+        offset that gives each retrain its own seed (``config.seed +
+        rounds_trained``). Reset it and the first round after a move replays the
+        trajectories of round zero, so a round of training costs full compute and
+        teaches the policy nothing it has not already seen. The torch generator
+        is carried for the same reason and not re-seeded: one stream through the
+        campaign is what keeps it reproducible, and a restarted stream re-draws
+        designs the campaign has already measured.
+
+        **The genetic teacher is moved, not carried and not rebuilt.** It is the
+        one piece of state here that would be silently wrong if it came across
+        untouched: a
+        [GeneticAlgorithm][evogfn.algorithms.baselines.genetic.GeneticAlgorithm]
+        reverts surplus substitutions to *its own* environment's parent, so a
+        teacher left at the old anchor would breed around a design nobody is
+        searching from any more, and
+        [train_genetic_gfn][evogfn.algorithms.gflownet.genetic_gfn.train_genetic_gfn]
+        filters its offspring through the new environment -- so the teacher would
+        quietly contribute nothing while the run continued to look like
+        Genetic-GFN. It is moved through its own hook rather than re-founded here
+        because whether a population is carried or refounded is the GA's own
+        question, answered by its ``carry_population`` flag and the reasoning in
+        its docstring; deciding it a second time in this module would override a
+        caller's choice from the outside.
+
+        **What is not carried is what does not exist.** This sampler holds no
+        measurements: ``observe`` is the inherited no-op, and everything it
+        learns arrives through the proxy, which is a surrogate over sequences and
+        so anchor-free. The rank-based buffer is built inside each retrain and
+        never crosses a round boundary, let alone a move; were it ever hoisted
+        onto the sampler it would need re-projecting, since a stored sequence is
+        anchor-free but its membership of the new ball is not.
+
+        Args:
+            env: The re-anchored environment. Must describe the same space --
+                same sequence length, same action layout -- since the policy's
+                heads are sized to it.
+
+        Returns:
+            A sampler over ``env``, sharing this one's policy and random stream
+            and continuing its counts. This one is left usable but should not be
+            used: it would train the same weights against the old anchor's masks.
+
+        Raises:
+            ValueError: If ``env`` changes the sequence length or the size of the
+                action space, which would leave the policy emitting logits for
+                actions that no longer exist. Refused rather than reshaped: a
+                policy silently mis-indexed against its environment proposes
+                designs no one chose, and nothing downstream would raise.
+        """
+        if env.sequence_length != self._env.sequence_length or env.n_actions != self._env.n_actions:
+            raise ValueError(
+                f"cannot carry a policy over {self._env.n_actions} actions on sequences of "
+                f"length {self._env.sequence_length} into an environment of {env.n_actions} "
+                f"actions on length {env.sequence_length}; the anchor may move but the "
+                f"sequence length and alphabet may not"
+            )
+
+        moved = GFlowNetSampler(
+            env,
+            self._policy,
+            proxy=self._proxy,
+            reward=self._reward,
+            config=self._config,
+            objective=self._objective,
+            genetic=None if self._genetic is None else self._genetic.reanchored(env),
+            genetic_config=self._genetic_config,
+            seed=self._seed,
+        )
+        moved._generator = self._sampling_generator()
+        moved._rounds_trained = self._rounds_trained
+        moved._proxy_calls = self._proxy_calls
+        moved._proposals_made = self._proposals_made
+        # The teacher's replay tallies are a running measurement of how much of
+        # what the GA bred the policy could be taught on, so they are a campaign
+        # total for the same reason the proxy spend is: restarted at each anchor
+        # they would report the last anchor's rounds as the whole run's.
+        moved._bred_designs = self._bred_designs
+        moved._unconstructible_designs = self._unconstructible_designs
+        return moved
+
     def propose(self, n: int) -> Tokens:
         """Retrain against the current proxy, then sample ``n`` designs.
 
@@ -142,7 +317,19 @@ class GFlowNetSampler(Sampler):
             # A distinct seed per round, or every round replays the same
             # trajectories and the later rounds teach nothing.
             config = replace(self._config, seed=self._config.seed + self._rounds_trained)
-            if self._genetic is not None:
+            # The unguided branch first so that `result` is typed by the general
+            # result and the genetic one narrows into it, rather than the other
+            # way round.
+            if self._genetic is None:
+                result = train_trajectory_balance(
+                    self._env,
+                    self._policy,
+                    self._proxy,
+                    self._reward,
+                    config,
+                    objective=self._objective,
+                )
+            else:
                 result = train_genetic_gfn(
                     self._env,
                     self._policy,
@@ -153,15 +340,12 @@ class GFlowNetSampler(Sampler):
                     genetic_config=self._genetic_config,
                     objective=self._objective,
                 )
-            else:
-                result = train_trajectory_balance(
-                    self._env,
-                    self._policy,
-                    self._proxy,
-                    self._reward,
-                    config,
-                    objective=self._objective,
-                )
+                # Only a run with a teacher scores designs the policy did not
+                # itself produce, so this is the only branch that can meet one
+                # it cannot construct. Accumulated rather than replaced: the
+                # quantity wanted is the campaign's share, not the last round's.
+                self._bred_designs += result.bred_designs
+                self._unconstructible_designs += result.unconstructible_designs
             self._proxy_calls += result.oracle_calls
             self._rounds_trained += 1
 

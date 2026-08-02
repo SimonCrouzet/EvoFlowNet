@@ -42,15 +42,14 @@ happens to factorise. This is a property of the relaxation, not an oversight in
 its implementation, and it is the honest limit of the method on a constrained
 space: **the search distribution cannot represent feasibility.**
 
-The decoder is a different matter, and this is where the earlier version of this
-file was leaving the baseline for dead. Decoding was already a *projection* --
-the argmax is followed by a projection onto the mutation budget -- and it simply
-did not project onto the other constraint. On this repository's ``feasibility``
-task (Ehrlich, ``L = 64``, ``transition_density = 0.15``) the consequence was
-total: the zero mean makes the initial argmax uniform over the alphabet, a
-uniform length-64 sequence satisfies the adjacency rule with probability about
-``4e-45``, and the arm scored ``-inf`` on every design of every seed. Rejection
-is no remedy at that density; it is not expensive, it is impossible.
+The decoder is a different matter, and it is where the baseline can be left for
+dead. Decoding is already a *projection* -- the argmax is followed by a
+projection onto the mutation budget -- and a decoder that stops there does not
+project onto the other constraint at all. On a sparse instance the consequence
+is total rather than merely lossy: the zero mean makes the initial argmax
+uniform over the alphabet, a uniform sequence satisfies a long adjacency chain
+with vanishing probability, and every design the arm emits is infeasible.
+Rejection is no remedy at that density; it is not expensive, it is impossible.
 
 So the projection is completed rather than the method abandoned. Feasibility
 here is a **first-order chain** constraint, so the highest-scoring sequence
@@ -63,8 +62,9 @@ mutations, so the feasible set the projection searches is never empty. The cost
 is wall clock rather than oracle calls or proposals -- ``proposals_made`` stays
 at one per design -- and
 [repaired_fraction][evogfn.algorithms.baselines.cmaes.CMAES.repaired_fraction]
-reports how often the raw argmax was unbuildable, which on a sparse instance is
-the number that says the relaxation is contributing nothing on its own.
+reports how often the raw argmax was unbuildable, which is the number that says
+how much of the arm's behaviour is the relaxation's and how much the
+projection's.
 
 Two things this does *not* claim. The distribution still spends its mass on
 infeasible logit configurations and only ever sees the landscape through the
@@ -502,8 +502,8 @@ class CMAES(Sampler):
             Ignored where the environment constrains no adjacencies, since the
             plain argmax is then already exact.
         feasible_only: Resample until every proposal is constructible. Left in
-            place as the check on ``repair`` rather than as the remedy it used
-            to be: rejection at the feasible densities this package benchmarks
+            place as the check on ``repair`` rather than as a remedy in its own
+            right: rejection at the feasible densities this package benchmarks
             at is not expensive but impossible, and with ``repair`` on nothing
             is ever rejected.
         max_attempts: Resampling rounds before giving up when ``feasible_only``.

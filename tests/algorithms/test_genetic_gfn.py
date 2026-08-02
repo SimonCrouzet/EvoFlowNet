@@ -5,6 +5,14 @@ quietly ignores its teacher. If the buffer never fills, if the genetic algorithm
 is handed no fitness to select on, or if the mixing ratio never takes effect,
 the loss still falls and the result is plain trajectory balance under another
 name. Each of those is tested separately.
+
+The second half of the file is about a teacher whose offspring the policy cannot
+construct. A GA under a feasibility constraint breeds designs that satisfy it and
+are still not terminal states of the construction graph, because every ordering
+of their mutations passes through a state the masks forbid. Those rows are
+dropped, and how many were dropped is a measurement of the landscape rather than
+a diagnostic of this trainer -- so it is asserted as an exact count, against a
+teacher built to breed a known share of them.
 """
 
 import numpy as np
@@ -57,6 +65,97 @@ def distinct(n):
             value //= ALPHABET.size
             position += 1
     return rows
+
+
+TRAP_ALPHABET = Alphabet.from_string("ABC")
+TRAP_LENGTH = 4
+TRAP_PARENT = np.zeros(TRAP_LENGTH, dtype=np.int32)
+
+# BCAA. Feasible -- BC and CA are both permitted -- two mutations from AAAA, and
+# reachable by no trajectory: mutating position 0 first passes through BAAA and
+# BA is forbidden, mutating position 1 first passes through ACAA and AC is
+# forbidden, and with two mutations those are all the orderings there are.
+TRAPPED = np.array([1, 2, 0, 0], dtype=np.int32)
+# AAAB. One mutation, and the single ordering to it is legal.
+BUILDABLE = np.array([0, 0, 0, 1], dtype=np.int32)
+
+
+class Flat(FitnessLandscape):
+    """Scores everything alike, so the teacher's *ranking* cannot confound.
+
+    Which offspring get replayed is decided by reward, and the count under test
+    is over exactly those. A landscape with structure would make the count a
+    fact about which designs happened to score well.
+    """
+
+    @property
+    def alphabet(self):
+        return TRAP_ALPHABET
+
+    @property
+    def sequence_length(self):
+        return TRAP_LENGTH
+
+    def _evaluate(self, sequences):
+        return np.ones((np.asarray(sequences).shape[0], 1), dtype=np.float64)
+
+
+class FixedTeacher(GeneticAlgorithm):
+    """A teacher whose offspring are known in advance.
+
+    A real GA reaches the gap by luck and rarely, and the quantity under test is
+    a ratio, so what a test needs is a teacher whose ratio is known. Selection
+    and recombination are overridden away rather than tuned: neither has any
+    bearing on whether replay can find a path to what comes out.
+    """
+
+    def pool(self):
+        """Cycled to fill a batch, so half of what it breeds is unbuildable."""
+        return np.stack([TRAPPED, BUILDABLE])
+
+    def propose(self, n):
+        pool = self.pool()
+        return np.tile(pool, (n // pool.shape[0] + 1, 1))[:n]
+
+
+class BuildableTeacher(FixedTeacher):
+    """The control: everything it breeds has a legal construction order."""
+
+    def pool(self):
+        return BUILDABLE[None, :]
+
+
+def trap_env():
+    """A mutation lattice holding a feasible design with no route into it."""
+    transitions = np.ones((TRAP_ALPHABET.size, TRAP_ALPHABET.size), dtype=np.float64)
+    transitions[1, 0] = 0.0  # B may not be followed by A
+    transitions[0, 2] = 0.0  # A may not be followed by C
+    return MutationEnvironment(TRAP_PARENT, TRAP_ALPHABET, max_mutations=2, transitions=transitions)
+
+
+def train_against(teacher, mix=1.0):
+    """Three steps of guidance in `trap_env`, one of them warmup.
+
+    Two steps therefore breed, at eight offspring each, and every one of them is
+    ranked into the training batch -- which is what makes the counts below exact
+    rather than approximate.
+    """
+    env = trap_env()
+    policy = SequencePolicy(
+        n_actions=env.n_actions,
+        sequence_length=TRAP_LENGTH,
+        n_tokens=TRAP_ALPHABET.size,
+        hidden_dim=32,
+    )
+    return train_genetic_gfn(
+        env,
+        policy,
+        Flat(),
+        TemperedReward(beta=1.0),
+        TrainingConfig(steps=3, batch_size=8, seed=0),
+        genetic=teacher(env, seed=0),
+        genetic_config=GeneticConfig(offspring=8, warmup=1, mix=mix),
+    )
 
 
 @pytest.fixture
@@ -235,6 +334,41 @@ class TestTraining:
                 genetic=GeneticAlgorithm(env, seed=0),
                 objective=DetailedBalance(),
             )
+
+    def test_it_measures_what_the_teacher_bred_and_what_could_be_built(self):
+        # Two guided steps, eight offspring each, alternating trapped and
+        # buildable: sixteen designs handed to replay and eight of them with no
+        # construction order. Asserted as counts rather than as a positive
+        # share, because a counter that increments on every row would pass the
+        # weaker check and report the constraint as total.
+        result = train_against(FixedTeacher)
+        assert result.bred_designs == 16
+        assert result.unconstructible_designs == 8
+
+    def test_a_teacher_breeding_only_buildable_designs_reports_no_gap(self):
+        # The control that gives the count above its meaning. The same env, the
+        # same masks, the same budget -- only the offspring differ.
+        result = train_against(BuildableTeacher)
+        assert result.bred_designs == 16
+        assert result.unconstructible_designs == 0
+
+    def test_a_run_with_no_guidance_breeds_nothing_to_count(self):
+        # At mix 0 nothing is replayed, so the share has no denominator. Zero
+        # here is the absence of a measurement, not a landscape without a gap.
+        result = train_against(FixedTeacher, mix=0.0)
+        assert result.bred_designs == 0
+        assert result.unconstructible_designs == 0
+
+    def test_the_trapped_design_is_one_the_environment_calls_reachable(self):
+        # Guards the fixture. `is_reachable` tests feasibility and budget, and
+        # says yes; a forward walk of the environment's own masks never arrives.
+        # If either half stopped holding, the counts above would still pass
+        # while measuring something else.
+        env = trap_env()
+        assert env.is_reachable(TRAPPED[None, :]).tolist() == [True]
+        built = env.reachable_terminal_states()
+        assert not any(np.array_equal(row, TRAPPED) for row in built)
+        assert any(np.array_equal(row, BUILDABLE) for row in built)
 
     def test_it_finds_better_designs_than_plain_trajectory_balance(self, env):
         # The claim Genetic-GFN exists to make. Marked slow because it needs

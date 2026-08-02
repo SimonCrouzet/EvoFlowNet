@@ -3,10 +3,8 @@
 Machine-learning-assisted directed evolution (Wittmann, Yue & Arnold, *Cell
 Systems* 2021) is three steps and no more: screen a random sample of the library,
 fit a regressor to it, order the variants it predicts best. There is no
-acquisition function, no uncertainty, no policy and no second thought. On the
-GB1 four-site landscape that protocol found a variant in the top 0.1% far more
-often than a directed-evolution walk did, which is why it is the reference point
-the field cites.
+acquisition function, no uncertainty, no policy and no second thought. It is
+nonetheless the reference point the field cites for supervised library design.
 
 It is here because it is the cheapest way for this project's central claim to be
 wrong. If one supervised fit on a random plate reaches the same designs a
@@ -63,9 +61,8 @@ Wittmann et al. do not fit one model. Their released implementation
 including KernelRidge, KNeighborsRegressor, BayesianRidge, ElasticNet,
 RandomForest and GradientBoosting -- each under **5-fold cross-validation**,
 ranks the architectures by cross-validation error, and averages the predictions
-of **all cross-validation instances of the top 3**. The previous version of this
-file fitted a single kernel ridge, which is one of their 22 members, and calling
-that MLDE understated the method.
+of **all cross-validation instances of the top 3**. A single kernel ridge is one
+of their 22 members, and calling that MLDE would understate the method.
 
 What is reproduced here, and is the paper's:
 
@@ -98,17 +95,15 @@ What is ours, and why:
   particular kernel and the median-heuristic bandwidth are ours. It is here
   because the polynomial kernel is global -- every training point influences
   every prediction -- and a local kernel is a genuinely different bias rather
-  than another point on the same regularisation path. It is the member that
-  earns most of the improvement over the single model this file used to fit.
+  than another point on the same regularisation path.
 * **No neural member, and no trees.** Their 5 Keras networks and 7 tree models
-  have no stand-in here, which is the largest gap. We built and measured a
-  random-ReLU-feature network as an affordable substitute for the Keras MLPs and
-  then removed it: at finite width such a model is a Monte-Carlo approximation
-  to the arc-cosine kernel, which for one-hot inputs is again a function of the
-  same agreement count the polynomial kernel already uses, so it contributed
-  sampling noise rather than a new bias -- and being near-constant, it was
-  *selected* by cross-validated MSE precisely when the real models were
-  struggling, which cost accuracy. A trained MLP would be a different model; one
+  have no stand-in here, which is the largest gap. The affordable substitute for
+  the Keras MLPs -- a random-ReLU-feature network -- is not one: at finite width
+  such a model is a Monte-Carlo approximation to the arc-cosine kernel, which for
+  one-hot inputs is again a function of the same agreement count the polynomial
+  kernel already uses, so it contributes sampling noise rather than a new bias --
+  and being near-constant, it is *selected* by cross-validated MSE precisely when
+  the real models are struggling. A trained MLP would be a different model; one
   trained per fold per round across thousands of campaigns is not affordable
   here. Tree ensembles are absent for the same cost reason.
 * **The candidate set.** Their library is four combinatorial sites -- 160,000
@@ -126,16 +121,13 @@ identity is standard; using it here instead of sklearn's KernelRidge is ours.
 Where the compression shows
 ---------------------------
 
-The two adaptations above interact, and the measurement is worth recording. At
-Wittmann et al.'s own training size the cross-validated selection is stable --
-across a pairwise-epistasis landscape at ``L = 256`` it chose the same three
-members on every seed tried, and the ensemble beat the single kernel ridge on
-every one. At the compressed 96-variant default the same selection becomes
-noisy: with only ~77 points per fold the members' cross-validated errors are
-within noise of each other, and the ensemble occasionally selects a member with
-no ranking power at all. It still wins on average, but the *variance* of running
-MLDE below its published training size is itself a cost, and it is a cost the
-budget note above is describing.
+The two adaptations above interact. Cross-validated selection between members
+only separates them when each fold holds out enough points to tell them apart,
+and the compressed 96-variant default leaves roughly 77 per fold. The members'
+errors can then sit within noise of each other and the ensemble can select a
+member with no ranking power at all. So the *variance* of running MLDE below its
+published training size is itself a cost, and it is a cost the budget note above
+is describing.
 """
 
 from __future__ import annotations
@@ -195,9 +187,9 @@ _ALPHA_SCALES = (0.1, 1.0, 10.0)
 
 #: Neighbourhood sizes for the k-NN members. 5 is sklearn's default, which is
 #: what their KNeighborsRegressor member runs at; 15 is the smoothed counterpart.
-#: k=1 was tried and dropped -- at ``L = 256`` with a mutation budget in the
-#: tens, every pair of variants agrees at over 80% of positions, so "the nearest
-#: neighbour" is close to arbitrary and the member is pure variance.
+#: k=1 is excluded -- at ``L = 256`` with a mutation budget in the tens any two
+#: variants agree at nearly every position, so "the nearest neighbour" is close
+#: to arbitrary and the member would be pure variance.
 _NEIGHBOURHOODS = (5, 15)
 
 #: Bandwidths for the local kernel, as multiples of the reciprocal median
@@ -613,8 +605,7 @@ class MLDE(Sampler):
         """Score sequences with the ensemble, refitting first if it is stale.
 
         Exposed because the ensemble's *predictions* are the thing worth
-        checking against the single model it replaced, and a comparison that has
-        to reach through
+        checking directly, and a comparison that has to reach through
         [propose][evogfn.algorithms.baselines.mlde.MLDE.propose] measures the
         candidate pool as much as the regressor.
 

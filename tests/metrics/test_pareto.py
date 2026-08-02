@@ -13,7 +13,25 @@ from evogfn.metrics import (
     pareto_front,
     r2_indicator,
 )
-from evogfn.metrics.pareto import MAX_INCLUSION_EXCLUSION_POINTS
+from evogfn.metrics.pareto import (
+    MAX_INCLUSION_EXCLUSION_POINTS,
+    _pymoo_hypervolume,
+    pymoo_available,
+)
+
+#: Marks a test of the exact-at-any-size path, which needs the optional `moo`
+#: extra. The gate is run both ways -- an optional dependency that breaks the
+#: core when absent is worse than no dependency -- so every test here is either
+#: skipped or run depending on the install, and none of them is skipped in both.
+requires_pymoo = pytest.mark.skipif(
+    not pymoo_available(), reason="needs the optional `moo` extra (uv sync --extra moo)"
+)
+
+#: The complement: what a numpy+torch install does when the front outgrows
+#: inclusion--exclusion, which is refuse.
+core_only = pytest.mark.skipif(
+    pymoo_available(), reason="the refusal is what happens *without* the `moo` extra"
+)
 
 
 class TestNonDominated:
@@ -194,13 +212,18 @@ class TestHypervolume:
         values = np.array([[3.0, 2.0], [-np.inf, -np.inf]])
         assert hypervolume(values, reference=[0.0, 0.0]) == pytest.approx(6.0)
 
+    @core_only
     def test_a_large_front_in_three_objectives_is_refused_not_approximated(self):
-        # Numerical honesty: past the exact method's limit this must say so
-        # rather than return a plausible wrong number.
+        # Numerical honesty: past the built-in method's limit, and with no exact
+        # backend installed, this must say so rather than return a plausible
+        # wrong number. The message has to name the fix, because the fix is an
+        # install rather than a change of method.
         k = MAX_INCLUSION_EXCLUSION_POINTS + 1
         i = np.arange(k, dtype=np.float64)
         values = np.stack([i + 1.0, float(k) - i, np.ones(k)], axis=1)
         with pytest.raises(NotImplementedError, match="inclusion-exclusion"):
+            hypervolume(values, reference=[-1.0, -1.0, -1.0])
+        with pytest.raises(NotImplementedError, match="moo"):
             hypervolume(values, reference=[-1.0, -1.0, -1.0])
 
     def test_a_front_at_the_limit_is_still_computed(self):
@@ -222,6 +245,84 @@ class TestHypervolume:
     def test_a_non_finite_reference_is_refused(self):
         with pytest.raises(ValueError, match="must be finite"):
             hypervolume(np.array([[1.0, 2.0]]), reference=[-np.inf, 0.0])
+
+
+class TestPymooAgreesWithInclusionExclusion:
+    """Two exact implementations of one quantity, checked against each other.
+
+    Nothing about "we compute hypervolume with pymoo now" is safe on its own.
+    pymoo minimises and this package maximises, so the adapter carries a sign
+    flip that cannot fail loudly: get it wrong and the result is a plausible
+    number that ranks methods in reverse, or a zero that reads as "this arm
+    found nothing". And the two implementations must not disagree in the range
+    where both can run, or a stored hypervolume would depend on which optional
+    packages happened to be installed when it was computed.
+
+    So the agreement is the test, over the whole range the built-in method
+    accepts, at every objective count the suite uses.
+    """
+
+    @requires_pymoo
+    @pytest.mark.parametrize("n_objectives", [2, 3, 4])
+    def test_random_fronts_up_to_the_built_in_limit(self, n_objectives):
+        # 2 objectives exercise the sweep, 3 and 4 inclusion-exclusion, so this
+        # covers every path a plain install can take.
+        rng = np.random.default_rng(20 + n_objectives)
+        reference = np.full(n_objectives, -0.1)
+        for k in range(2, MAX_INCLUSION_EXCLUSION_POINTS + 1):
+            for _ in range(20):
+                values = rng.uniform(0.0, 1.0, size=(k, n_objectives))
+                ours = hypervolume(values, reference=reference)
+                theirs = _pymoo_hypervolume(values[non_dominated(values)], reference)
+                assert theirs == pytest.approx(ours, rel=1e-12, abs=1e-12)
+
+    @requires_pymoo
+    def test_the_sign_convention_is_maximisation_not_pymoos_minimisation(self):
+        # Imported here, not at the top: the whole point of the extra is that a
+        # core install can run this file, and it would fail at collection.
+        from pymoo.indicators.hv import HV  # noqa: PLC0415
+
+        # Two boxes of volume 2 overlapping in a unit cube: 2 + 2 - 1 = 3, the
+        # same hand-computed case the built-in method is checked on above.
+        front = np.array([[1.0, 1.0, 2.0], [2.0, 1.0, 1.0]])
+        reference = np.zeros(3)
+        assert _pymoo_hypervolume(front, reference) == pytest.approx(3.0)
+        # And what the identical call does with the signs left alone. pymoo
+        # measures the region *below* its reference point, so a maximising front
+        # handed over untouched encloses nothing. This assertion is here so that
+        # dropping the negation cannot pass: without it, the only symptom would
+        # be a hypervolume column of zeros that reads as a result.
+        assert float(HV(ref_point=reference)(front)) == 0.0
+
+    @requires_pymoo
+    def test_it_still_rises_when_the_set_improves(self):
+        # The property that makes hypervolume worth reporting at all, checked on
+        # the path that only exists past the built-in limit. A minimising
+        # implementation would move this the other way.
+        rng = np.random.default_rng(21)
+        values = rng.uniform(0.0, 1.0, size=(MAX_INCLUSION_EXCLUSION_POINTS + 8, 3))
+        # Projected onto the simplex, where no distinct point can dominate
+        # another -- so the front is the whole set and is certain to outgrow the
+        # built-in limit rather than merely likely to.
+        values /= values.sum(axis=1, keepdims=True)
+        reference = [-0.1, -0.1, -0.1]
+        assert non_dominated(values).sum() > MAX_INCLUSION_EXCLUSION_POINTS
+        before = hypervolume(values, reference=reference)
+        dominating = values.max(axis=0) + 0.5
+        assert hypervolume(np.vstack([values, dominating]), reference=reference) > before
+
+    @requires_pymoo
+    def test_the_front_size_a_converged_ch65_arm_produces_is_now_computed(self):
+        # 19 points is measured, not invented: CH65's top-384 designs by weighted
+        # sum give a front of that size, where a random draw gives 2-9. Before
+        # this path existed the column went missing for exactly the arms that did
+        # best. A staircase of unit-thickness rectangles, so the answer is
+        # 19 + 18 + ... + 1 by hand.
+        k = 19
+        i = np.arange(k, dtype=np.float64)
+        values = np.stack([i + 1.0, float(k) - i, np.ones(k)], axis=1)
+        assert non_dominated(values).sum() == k
+        assert hypervolume(values, reference=[0.0, 0.0, 0.0]) == pytest.approx(190.0)
 
 
 class TestR2Indicator:
