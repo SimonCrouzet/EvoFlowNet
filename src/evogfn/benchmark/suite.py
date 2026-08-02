@@ -893,7 +893,18 @@ def run_task(
             cpu_started = time.process_time()
             wall_started = time.perf_counter()
             campaign = method(task, seed)
-            result = campaign.run()
+            try:
+                result = campaign.run()
+            except RuntimeError as exc:
+                # An arm that cannot fill its plate raises rather than quietly
+                # measuring fewer designs. On a sparse feasible set that is a
+                # property of the method -- rejection sampling stalls where
+                # masking is free -- so it is reported and the seed is left
+                # unstored, which shows up as a short seed count rather than as
+                # a number pretending to be comparable. Propagating it would
+                # discard every arm the sweep had already finished.
+                report(f"  {task.name}/{name}: seed {seed} exhausted -- {exc}")
+                continue
             cpu_seconds = time.process_time() - cpu_started
             wall_seconds = time.perf_counter() - wall_started
             method_sampler = campaign.sampler
