@@ -2,10 +2,9 @@
 
 Two methods run on the same seed share their surrogate initialisation, their
 landscape, and their initial design. Pairing on that removes the seed-to-seed
-variance, which on GB1 is the dominant term: an unpaired test at 15 seeds put
-the GFlowNet's advantage over a genetic algorithm at t = 0.9, the paired test on
-the same numbers at t = 1.45. Reporting the unpaired figure would have thrown
-away most of the experiment.
+variance, which on these landscapes is the dominant term; an unpaired test over
+the same numbers throws that cancellation away and reports a weaker statistic
+for the same experiment.
 
 What is reported, and why all of it
 -----------------------------------

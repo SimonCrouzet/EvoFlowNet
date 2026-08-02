@@ -21,21 +21,21 @@ something about a real assay and something about a controlled one:
 * `mo-ehrlich-hard` -- two Ehrlich objectives at maximum conflict, at L=10, v=4,
   c=2, k=5, density 0.5, seed 2. The alphabet is what that task is for: four
   letters is DNA/RNA, and it makes $4^{10}$ = 1,048,576 sequences enumerable, so
-  the reference front IGD+ measures coverage of is the **true** one. The earlier
-  version of this task mirrored `protocol-alde`'s parameters exactly (L=64,
-  v=20, c=2, k=4) to make "what does adding an objective cost?" a paired
-  question, and that pairing is gone: a 20-letter alphabet is enumerable only to
-  L=5, so the price of the pairing was a two-point substitute front. See
+  the reference front IGD+ measures coverage of is the **true** one. That
+  settles the instance parameters rather than mirroring `protocol-alde`'s: a
+  20-letter alphabet is enumerable only to L=5, so a paired instance and an
+  exact front cannot both be had. See
   [MO_VOCAB_SIZE][evogfn.benchmark.multi_objective.MO_VOCAB_SIZE] and the
-  constants below it for every alignment that moved and what it bought.
+  constants below it for what each alignment with the single-objective suite
+  costs or keeps.
 
 **Explanatory sweeps** answer "under what conditions does the ranking change".
 They vary conflict at fixed objective count, and objective count at fixed
 conflict, on the same instance family at a different seed. They are *not* inputs
 to the main table -- a method that wins at low conflict and loses at 1.0 has not
 won anything, and the sweep is how that gets said rather than a source of extra
-headline rows. The conflict rungs sit on a measured transition rather than on
-round numbers; see
+headline rows. The conflict rungs bracket the point at which a trade-off starts
+to exist rather than sitting on round numbers; see
 [CONFLICT_SWEEP][evogfn.benchmark.multi_objective.CONFLICT_SWEEP].
 
 **The one diagnostic that decides something** is `mo-preferences`. A scalarised
@@ -64,20 +64,17 @@ than defaulted:
 * **The reference front** is what IGD+ measures coverage of, and every task here
   now supplies the exact one: CH65's by sweeping its measured library, the
   Ehrlich tasks' by enumerating their $4^{10}$ space. `front_is_exact` is
-  therefore `True` throughout, which it was not -- the Ehrlich tasks used to
-  carry a constructed subset, and `mo-ehrlich-hard`'s ran to two points.
+  therefore `True` throughout.
 
 Hypervolume is **computable here only if the optional `moo` extra is
 installed**, and where it is not that is reported rather than patched.
 [evogfn.metrics.pareto][] is exact in every dimension it accepts; its built-in
 method stops at 16 front points in three or more objectives, and pymoo takes
-over past that when it is available. The limit is reached in practice, and by
-the wrong runs: on CH65 a random 384-design draw has a front of 2--9 points and
-computes either way, while the 384 designs a method actually converges on have a
-front of up to 19. `mo-objectives-4`'s exact front alone is 23 points. So a
-core-only install loses the hypervolume of the arms that did best -- which is why
-`ch65-real` also carries an exact reference front and is read on IGD+. A `nan`
-in that column is "not computed", never "no volume".
+over past that when it is available. The limit is reachable, and by the wrong
+runs: an arm that converges carries a wider measured front than one that
+scatters, so it is the converged arms whose hypervolume a core-only install
+loses -- which is why `ch65-real` also carries an exact reference front and is
+read on IGD+. A `nan` in that column is "not computed", never "no volume".
 
 ## Left-censoring on CH65, and what it does to a front
 
@@ -87,32 +84,58 @@ by any amount below it. A front computed over the measured library therefore
 risks carrying points that are non-dominated only because a censored objective
 could not resolve them.
 
-Measured, the damage is one point: the library's Pareto front is **20 points
-including censored variants and 19 excluding them**, and the difference is a
-single variant. The reason it is not worse is arithmetical --
+The damage such a point can do is bounded, and the reason is arithmetical --
 [hypervolume][evogfn.metrics.pareto.hypervolume] only counts designs *strictly
 above* the reference point, and a censored value sits exactly on it, so the
-33,073 variants uncensored on every objective are precisely the ones that
-contribute any volume at all. `CH65_FRONT_UNCENSORED` is the front this module
+variants uncensored on every objective are precisely the ones that contribute
+any volume at all. A front over the uncensored variants is what this module
 scores IGD+ against, for that reason.
 
 ## Arms
 
-Four, and deliberately not five.
-[MOGFN-PC][evogfn.rewards.scalarization] -- one preference-conditioned model
-covering the whole front -- is out of scope here; `mo-preferences` measures what
-running several single-preference models costs instead, which is the comparison
-that has to exist before a conditioned model can be said to beat anything.
+Four published pipelines and a three-rung ladder, laid out exactly as
+[evogfn.benchmark.methods][]'s `BASELINES` is and for the same reason: a method
+for directed evolution is a whole pipeline, and a pipeline is what a lab chooses
+between. The surrogate is *constitutive* of the GFlowNet pipeline -- it is what
+makes a policy trainable at 384 assays -- but handing one to a genetic algorithm
+produces a method nobody published, so that addition is a named rung rather than
+a silent default.
+
+The pipelines, which are what the headline table compares:
 
 * `random` -- mutagenesis, no surrogate. The floor: a hypervolume with nothing
   below it is a number rather than a result.
 * `nsga2` -- NSGA-II, ranking by dominance. The incumbent, and the arm that picks
   no trade-off at all, which is exactly what scalarisation gives up.
-* `genetic+proxy` -- a genetic algorithm optimising the scalarised proxy. The
-  strongest classical control: same model access, same trade-off, no learning.
-* `gfn-tb` -- a trajectory-balance GFlowNet. The method under test.
+* `genetic` -- a weighted-sum genetic algorithm, bare. The reference every other
+  arm is paired against, because directed evolution *is* a genetic algorithm and
+  this is the pipeline a lab would otherwise run. Bare on purpose: a reference
+  that is itself a hybrid nobody published would pair every headline number
+  against something a reviewer does not have to accept.
+* `gfn-tb` -- a trajectory-balance GFlowNet over a **fixed** weighted-sum
+  scalarisation. Read the name as GFlowNet-AL under one preference, not as
+  MOGFN-PC: [MOGFN-PC][evogfn.rewards.scalarization] samples a preference per
+  step and conditions the policy on it, and that is out of scope here.
+  `mo-preferences` measures what running several single-preference models costs
+  instead, which is the comparison that has to exist before a conditioned model
+  can be said to beat anything.
 
-Every one of them is handed a
+The ladder, on the two representative pipelines, one thing added per rung:
+
+=================  =====================================================
+arm                what it adds
+=================  =====================================================
+``genetic``        nothing; the model does not exist
+``genetic+screen`` the model filters the pool; the search stays blind
+``genetic+search`` the sampler also optimises against the model
+``random+screen``  the same first rung on the floor
+=================  =====================================================
+
+`genetic+search` is named for the mechanism rather than for the fact that a
+proxy is present, and the rungs read the same way here as in the
+single-objective table, which is the only way a reader can line the two up.
+
+Every arm is handed a
 [ScalarizedAcquisition][evogfn.acquisition.rules.ScalarizedAcquisition], NSGA-II
 included, because the campaign refuses a scalar rule against a vector-valued
 landscape at construction. For NSGA-II that rule ranks nothing -- the arm runs
@@ -121,6 +144,25 @@ without a surrogate, so no pool is ever scored -- but the campaign still uses
 the ledger's ``best_so_far`` and for the re-anchoring step. Since every arm gets
 the *same* uniform preference for that, the anchor rule is a property of the
 protocol rather than of an arm.
+
+## Pool size is part of the method, here as well
+
+A genetic algorithm's pool is its population, and Stanton et al. run population
+== evaluation batch == one plate, so `genetic` and `random` are asked for exactly
+[PLATE_POOL][evogfn.benchmark.multi_objective.PLATE_POOL]. The screened rungs
+keep the 2048-candidate library, because a screen with nothing to screen is not a
+screen -- at a plate the model would rank 96 candidates into 96 wells and change
+nothing.
+
+Whether a plate is *survivable* here is a fair question, because these tasks are
+far more saturated than their single-objective counterparts: at L=10, v=4 and a
+radius of 4, the ball a campaign proposes from is small against a budget of 384
+assays, so a plate-sized pool has to work harder to fill a plate with distinct
+designs. What makes it survivable is the campaign itself: it fills a short plate
+by asking again, up to
+[MAX_PROPOSAL_ATTEMPTS][evogfn.loop.campaign.MAX_PROPOSAL_ATTEMPTS] calls, so
+the population stays the published one and coherence wins -- the same published
+GA appears in both tables.
 """
 
 from __future__ import annotations
@@ -138,11 +180,11 @@ from evogfn.algorithms.base import Sampler
 from evogfn.algorithms.baselines.genetic import GeneticAlgorithm
 from evogfn.algorithms.baselines.mutagenesis import RandomMutagenesis
 from evogfn.algorithms.baselines.nsga2 import NSGA2
-from evogfn.algorithms.gflownet.objectives import TrajectoryBalance
 from evogfn.algorithms.gflownet.sampler import GFlowNetSampler
 from evogfn.algorithms.gflownet.training import TrainingConfig
 from evogfn.algorithms.inner_loop import ProxyOptimising
 from evogfn.benchmark.determinism import is_deterministic
+from evogfn.benchmark.methods import DEFAULT_HIDDEN_DIM
 from evogfn.benchmark.protocol import PLATE, Protocol
 from evogfn.benchmark.suite import DIAGNOSTIC_MUTATIONS, Purpose, Tier
 from evogfn.benchmark.tasks import Task
@@ -164,6 +206,7 @@ if TYPE_CHECKING:
 
     import numpy.typing as npt
 
+    from evogfn.algorithms.gflownet.objectives import GFlowNetObjective
     from evogfn.benchmark.store import ResultStore
     from evogfn.core.types import Fitness, Tokens
     from evogfn.landscapes.base import FitnessLandscape
@@ -183,15 +226,14 @@ MultiObjectiveMethodology = Callable[["Task", int], "Campaign | PreferenceEnsemb
 #: towards -- the same geometry as ``gb1-anchor`` in the single-objective suite.
 CH65_MUTATIONS = CH65_N_SITES
 
-#: Alphabet size on every multi-Ehrlich task. Four, and it was measurement that
-#: forced it rather than taste. These tasks are read on IGD+ against a reference
+#: Alphabet size on every multi-Ehrlich task. Four, and the exact front is what
+#: forces it rather than taste. These tasks are read on IGD+ against a reference
 #: front, and a reference front is only worth the word if it is the *exact* one --
 #: which means enumerating the space. At the 20-letter alphabet the
 #: single-objective suite uses, $20^L$ clears
 #: [MAX_ENUMERABLE_SIZE][evogfn.landscapes.base.MAX_ENUMERABLE_SIZE] at $L = 6$,
-#: so **no** Ehrlich task here was enumerable and every one of them fell back to
-#: a constructed front. `mo-ehrlich-hard`'s had two points: a coverage indicator
-#: with two things to cover.
+#: so **no** Ehrlich task at a useful length is enumerable there and every one of
+#: them would fall back to a constructed front.
 #:
 #: Four letters is DNA/RNA rather than a toy -- aptamer and ribozyme selection are
 #: directed evolution over exactly this alphabet -- and $4^{10} = 1{,}048{,}576$
@@ -201,26 +243,24 @@ MO_VOCAB_SIZE = 4
 
 #: Sequence length on every multi-Ehrlich task, hard and diagnostic alike.
 #:
-#: Ten is the largest length at which the space is enumerable *and* two Ehrlich
-#: motifs still fit: $4^{11} = 4.2$M is also inside the guard but costs six times
-#: the enumeration for measurably **smaller** fronts (4 points at maximum
-#: conflict against 5, seed 2), and $4^{12}$ is past it.
+#: Ten is a length at which the space is enumerable *and* two Ehrlich motifs
+#: still fit: $4^{11} = 4.2$M is also inside the guard but at four times the
+#: enumeration cost, and $4^{12}$ is past it.
 #:
 #: The single-objective suite's two lengths -- 64 for the protocol tasks, 32 for
-#: the diagnostics -- cannot survive that, so `mo-ehrlich-hard` and the sweeps now
-#: run at one length and differ by instance seed and conflict alone. That is a
-#: real loss and is recorded here rather than in a changelog: "hard" no longer
-#: means "longer", it means "the seed the protocol tasks use, at maximum
+#: the diagnostics -- cannot survive that, so `mo-ehrlich-hard` and the sweeps
+#: run at one length and differ by instance seed and conflict alone. That costs
+#: an alignment and is stated here rather than left implicit: "hard" does not
+#: mean "longer", it means "the seed the protocol tasks use, at maximum
 #: conflict".
 MO_LENGTH = 10
 
 #: Tokens per motif, $k$. Five rather than the single-objective suite's four,
 #: and this is the alignment the exact front cost most. An Ehrlich value is
 #: quantised to $q = k$ levels per motif, so $k$ is what bounds how many distinct
-#: objective vectors a front can even contain: at $k = 4$ the exact front at
-#: maximum conflict measured **one to two points**, which is no better than the
-#: constructed front it replaces. At $k = 5$ it measures 3 to 5 at two
-#: objectives, 9 to 12 at three and 23 to 25 at four.
+#: objective vectors a front can even contain -- and a front too thin to spread
+#: over gives a coverage indicator almost nothing to measure. Five is the
+#: smallest $k$ that leaves room for a front worth covering at this length.
 MO_MOTIF_LENGTH = 5
 
 #: Largest gap between consecutive motif positions. One -- contiguous motifs --
@@ -236,11 +276,11 @@ MO_MAX_SPACING = 1
 #: it reach further than the sequence is long.
 #:
 #: What this costs is worth stating plainly: 4 substitutions of the shared chain
-#: reach **493** constructible designs, out of 8,616 feasible sequences in the
-#: whole space. A four-plate protocol spends 384 assays against that, so these
-#: tasks now sit in a far more saturated regime than their single-objective
-#: counterparts, where the reachable set is astronomical. They measure how well a
-#: method covers a front, not whether it can find one at all.
+#: reach a small set of constructible designs, and a four-plate protocol spends
+#: 384 assays against it -- so these tasks sit in a far more saturated regime than
+#: their single-objective counterparts, where the reachable set is astronomical.
+#: They measure how well a method covers a front, not whether it can find one at
+#: all.
 MO_EHRLICH_MUTATIONS = DIAGNOSTIC_MUTATIONS
 
 #: Ehrlich instance seed shared with `protocol-alde` and `protocol-evolvepro`.
@@ -249,28 +289,20 @@ MO_HARD_SEED = 2
 #: Ehrlich instance seed shared with the single-objective diagnostics.
 MO_DIAGNOSTIC_SEED = 7
 
-#: Conflict values swept in the explanatory tier, chosen from a scan rather than
-#: from the round numbers. The dial is not a smooth knob on front size: it
-#: redraws each objective's planted optimum and its motif placement, so the
-#: instance changes wholesale at every rung and the front size is noisy in
-#: conflict. What the scan is for is locating the *transition*, and the exact
-#: front over the whole $4^{10}$ space at these settings gives it:
+#: Conflict values swept in the explanatory tier, placed on where a trade-off
+#: starts to exist rather than on the round numbers. The dial is not a smooth
+#: knob on front size: it redraws each objective's planted optimum and its motif
+#: placement, so the instance changes wholesale at every rung and the front size
+#: is noisy in conflict. What the rungs are for is locating the *transition*
+#: between a front that is a single point and a front worth spreading over.
 #:
-#: | conflict | 0.0 | 0.1 | 0.2 | 0.3 | 0.4 | 0.5 | 0.6 | 0.7 | 0.8 | 0.9 | 1.0 |
-#: | -------- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-#: | seed 7 (swept) | 1 | 2 | 1 | 1 | 1 | 1 | 3 | 2 | 3 | 2 | 3 |
-#: | seed 2 (hard)  | 1 | 1 | 1 | 1 | 2 | 3 | 2 | 3 | 3 | 3 | 5 |
-#:
-#: The old rungs `(0.0, 0.25, 0.5, 0.75, 1.0)` were round numbers rather than
-#: measurements, and at the old settings 0.0 and 0.25 gave the *same* one-point
-#: front -- two of five rungs measuring no trade-off at all. On this instance
-#: they land no better: `1, 1, 1, 3, 3`, three rungs below the transition and a
-#: gap of 0.25 across it. These five give `1, 1, 3, 3, 3`. They keep 0.0 as the
-#: control, where a single-point front is provable from the construction rather
-#: than merely observed, and put 0.4 and 0.6 either side of where the front
-#: starts to spread -- on the swept seed it moves between exactly those two, and
-#: on seed 2 it has already moved by 0.4. The transition is then visible in the
-#: sweep's own front sizes instead of being asserted here.
+#: Evenly spaced rungs spend most of themselves below that transition and then
+#: cross it in one step, which measures no trade-off at three rungs out of five
+#: and says nothing about where the trade-off appeared. These keep 0.0 as the
+#: control -- where a single-point front is provable from the construction rather
+#: than merely observed -- and place 0.4 and 0.6 either side of the transition.
+#: It is then visible in the sweep's own front sizes instead of being asserted
+#: here.
 CONFLICT_SWEEP: tuple[float, ...] = (0.0, 0.4, 0.6, 0.8, 1.0)
 
 #: Objective counts swept in the explanatory tier. Two is the same instance as
@@ -303,10 +335,9 @@ CH65_REFERENCE_POINT: tuple[float, ...] = (
 #: Front points [hypervolume][evogfn.metrics.pareto.hypervolume] accepts in three
 #: or more objectives **without** the optional `moo` extra, before its built-in
 #: inclusion--exclusion becomes intractable. Restated here because it decides
-#: whether this suite has a hypervolume column at all: on `ch65-real` a converged
-#: arm produces a 19-point front and a random one 2--9, and on `mo-objectives-4`
-#: the exact front alone runs to 25 points -- so a core-only install loses the
-#: number for precisely the arms that did best.
+#: whether this suite has a hypervolume column at all: an arm that converges
+#: carries a wider measured front than one that scatters, so a core-only install
+#: loses the number for precisely the arms a ranking would turn on.
 #:
 #: With the extra installed the limit does not apply and nothing here records
 #: `nan`. Without it, read those tasks on IGD+.
@@ -331,14 +362,30 @@ DEFAULT_TRAINING_STEPS = 300
 #: Reward exponent, as in Jain et al. and the MOGFN papers.
 DEFAULT_BETA = 3.0
 
-#: Candidates generated per round before selection, for the arms that select.
+#: Candidates generated per round before selection, for the arms that select --
+#: the screened rungs and the GFlowNet. Equal to
+#: [DEFAULT_POOL][evogfn.benchmark.methods.DEFAULT_POOL] by intent rather than by
+#: coincidence: an ablation whose library differed between the two suites would
+#: make the two `+screen` rows measure different amounts of screening while
+#: sharing a name.
 DEFAULT_POOL = 2048
 
-#: Pool multiplier for the arms that do **not** select. NSGA-II runs without a
-#: surrogate, so its round is "breed, measure the first plateful, survive"; a
-#: pool of exactly one plate would be shortened by deduplication and the arm
-#: would quietly underspend its budget. Four plates leaves room for that without
-#: turning the generation into a pool the arm never uses.
+#: Pool size meaning "exactly the plate this campaign measures", resolved in
+#: `_campaign` against the batch it was given rather than written as 96. The same
+#: sentinel as [PLATE_POOL][evogfn.benchmark.methods.PLATE_POOL] and for the same
+#: reason -- a protocol sweep varies the plate and a literal would stop tracking
+#: it -- with one extra consequence here: the preference ensemble *splits* the
+#: plate, so a sub-campaign measuring 12 designs must be asked for 12, and a
+#: constant would have handed each of eight preferences the undivided plate.
+PLATE_POOL = 0
+
+#: Pool multiplier for NSGA-II, whose generation is neither a plate nor a
+#: library. It runs without a surrogate, so its round is "breed, measure the
+#: first plateful, survive", and the multiplier makes the offspring generation
+#: larger than the plate it fills. Kept where it was: NSGA-II's $\lambda$ is the
+#: one pool here that no paper in the single-objective suite has an opinion
+#: about, so aligning it would be a change to the method rather than to the
+#: harness.
 UNSELECTED_POOL_PLATES = 4
 
 # A campaign needs at least two measurements before a pairwise diversity exists.
@@ -373,26 +420,25 @@ def ch65_reference_front(landscape: FitnessLandscape) -> npt.NDArray[np.float64]
 
     Exact in the strong sense: the 16-site lattice is 65,536 variants, 62,926 of
     them cleared QC on all three antigens, and
-    [non_dominated][evogfn.metrics.pareto.non_dominated] sweeps that in well
-    under a second. There is no sampling and no method-dependent reference set,
-    which is what makes an IGD+ on this task a number rather than a ranking that
-    moves when an arm is added.
+    [non_dominated][evogfn.metrics.pareto.non_dominated] sweeps all of them.
+    There is no sampling and no method-dependent reference set, which is what
+    makes an IGD+ on this task a number rather than a ranking that moves when an
+    arm is added.
 
     Censored variants are excluded, and the exclusion is the whole reason this
     function exists rather than a one-line call. 47.4% of `affinity_SI06` sits at
     the Tite-Seq detection floor, where the value reported is a *bound* and two
-    variants tied there may differ by any amount below it. Including them adds
-    one point to the front (20 rather than 19) that is non-dominated only because
-    an objective could not resolve it -- and that point can never be attained by
-    any arm anyway, since a design must beat the reference point *strictly* on
-    every objective to enclose any volume, and a censored value sits exactly on
-    it.
+    variants tied there may differ by any amount below it. Including them can
+    only add points that are non-dominated because an objective could not resolve
+    them -- and such a point can never be attained by any arm anyway, since a
+    design must beat the reference point *strictly* on every objective to enclose
+    any volume, and a censored value sits exactly on it.
 
     Args:
         landscape: The CH65 landscape.
 
     Returns:
-        A `(19, 3)` array of the non-dominated affinity vectors among variants
+        An `(m, 3)` array of the non-dominated affinity vectors among variants
         measured, and uncensored, on all three antigens.
 
     Raises:
@@ -421,20 +467,15 @@ def enumerated_front(landscape: FitnessLandscape) -> npt.NDArray[np.float64]:
     particular construction found", while against the enumerated front it means
     covered the front. Only the second reading is a claim.
 
-    $4^{10} = 1{,}048{,}576$ sequences, scored in about 1.5 seconds and cached by
+    $4^{10} = 1{,}048{,}576$ sequences, scored once and cached by
     [MultiObjectiveTask.reference_front][evogfn.benchmark.multi_objective.MultiObjectiveTask.reference_front],
-    so a fifty-seed arm pays for it once. Measured front sizes at maximum
-    conflict: 3--5 points at two objectives, 9--12 at three, 23--25 at four --
-    against the **two** points
-    [recombination_front][evogfn.benchmark.multi_objective.recombination_front]
-    produced for `mo-ehrlich-hard` at the old settings.
+    so a fifty-seed arm pays for it once.
 
     Note that the front over the whole space is generally *not* attainable under
-    a mutation budget: at 4 substitutions from the campaign's parent only 493
-    designs are reachable, and their front is a subset. That is the honest target
+    a mutation budget: only the designs inside the campaign's radius are
+    reachable, and their front is a subset of this one. That is the honest target
     -- an arm that cannot reach a front point should be charged for it -- but it
-    does mean IGD+ = 0 is not expected here, where against the constructed front
-    it was.
+    does mean IGD+ = 0 is not expected here.
 
     Args:
         landscape: The multi-Ehrlich landscape.
@@ -464,9 +505,9 @@ def recombination_front(landscape: FitnessLandscape) -> npt.NDArray[np.float64]:
 
     ## What this is for now
 
-    Nothing in this suite: every task here moved to
-    [enumerated_front][evogfn.benchmark.multi_objective.enumerated_front] when
-    the alphabet dropped to 4 and the space became enumerable. It is kept because
+    Nothing in this suite: every task here is scored against
+    [enumerated_front][evogfn.benchmark.multi_objective.enumerated_front],
+    because at a 4-letter alphabet the space is enumerable. It is kept because
     the problem it solves has not gone away -- a multi-Ehrlich instance at the
     20-letter alphabet, or at any length past
     [MO_LENGTH][evogfn.benchmark.multi_objective.MO_LENGTH], has no enumerable
@@ -477,10 +518,10 @@ def recombination_front(landscape: FitnessLandscape) -> npt.NDArray[np.float64]:
     [exact_pareto_front][evogfn.landscapes.multi_ehrlich.MultiEhrlichLandscape.exact_pareto_front]
     enumerates the whole space, and the whole space at $v = 20$, $L = 32$ is
     $20^{32}$ -- twenty-five orders of magnitude past
-    [MAX_ENUMERABLE_SIZE][evogfn.landscapes.base.MAX_ENUMERABLE_SIZE]. It was not
+    [MAX_ENUMERABLE_SIZE][evogfn.landscapes.base.MAX_ENUMERABLE_SIZE]. It is not
     a matter of patience: a 20-letter alphabet is enumerable only up to $L = 5$,
-    so *no* instance in this suite was enumerable and something had to take the
-    exact front's place visibly.
+    so an instance at those settings has no exact front and something has to take
+    its place visibly.
 
     ## What this is instead
 
@@ -494,12 +535,11 @@ def recombination_front(landscape: FitnessLandscape) -> npt.NDArray[np.float64]:
     forbidden adjacency at either junction -- score $-\infty$ and are dropped by
     the landscape's own front routine rather than by a filter here.
 
-    Segments rather than the single crossovers a genetic algorithm uses, and the
-    difference is measured rather than assumed: at four objectives on the L=32
-    instance, prefix crossovers alone find 13 non-dominated points and segments
-    find 22, several of which *dominate* what the prefixes found. The cost is a
-    pool of $O(k^2 L^2)$ sequences -- 4,292 at L=64 with two objectives, 6,736 at
-    L=32 with four -- which an Ehrlich function scores in milliseconds.
+    Segments rather than the single crossovers a genetic algorithm uses, because
+    a prefix crossover can only express the trade-offs that lie on one cut point,
+    while a transplant can take an interior stretch and reach hybrids no prefix
+    does. The cost is a pool of $O(k^2 L^2)$ sequences, which an Ehrlich function
+    scores cheaply.
 
     Two properties follow, and both matter for reading a number computed against
     it:
@@ -514,11 +554,10 @@ def recombination_front(landscape: FitnessLandscape) -> npt.NDArray[np.float64]:
       saturating it is a larger candidate set, not a claim.
 
     How thick the answer is varies sharply with the instance, and thin is not
-    wrong but is coarse -- and it was the measured thinness that retired this
-    from the suite. At the old settings `mo-ehrlich-hard` (v=20, L=64) yielded
-    **two** points, `(0.375, 1.0)` and `(1.0, 0.5)`, so IGD+ there was
-    essentially "did you find both ends of the trade-off"; the L=32 sweeps
-    yielded 1 to 22.
+    wrong but is coarse: where the construction finds little more than each
+    objective's own optimum, IGD+ against it asks little more than "did you find
+    both ends of the trade-off". That is the reason to prefer an enumerated front
+    wherever the space allows one.
 
     At `conflict = 0` every planted optimum is the same sequence, so the set
     collapses to one point and the front is `[[1, ..., 1]]` -- which is what the
@@ -664,9 +703,9 @@ class MultiObjectiveTask(Task):
 
         Memoised on the task's name. Every campaign asks for this at
         construction, and CH65's answer costs a 14 MB CSV parse and a sweep of
-        62,926 variants -- which at a hundred seeds times four arms is the
-        dominant cost of the whole task and produces the identical array each
-        time. A copy is returned, so a caller holding one cannot edit the front
+        62,926 variants -- which every seed of every arm would otherwise repeat,
+        for the identical array each time. A copy is returned, so a caller
+        holding one cannot edit the front
         every later campaign will be scored against.
 
         Returns:
@@ -765,9 +804,9 @@ def _multi_ehrlich(
     [MO_VOCAB_SIZE][evogfn.benchmark.multi_objective.MO_VOCAB_SIZE],
     [MO_LENGTH][evogfn.benchmark.multi_objective.MO_LENGTH],
     [MO_MOTIF_LENGTH][evogfn.benchmark.multi_objective.MO_MOTIF_LENGTH] and
-    [MO_MAX_SPACING][evogfn.benchmark.multi_objective.MO_MAX_SPACING] were all
-    moved to buy an enumerable space -- so "what does adding an objective cost?"
-    is no longer a paired question against `protocol-alde` and must be read as a
+    [MO_MAX_SPACING][evogfn.benchmark.multi_objective.MO_MAX_SPACING] all depart
+    from it to buy an enumerable space -- so "what does adding an objective
+    cost?" is not a paired question against `protocol-alde` and must be read as a
     comparison within this suite.
 
     Args:
@@ -839,7 +878,7 @@ MULTI_OBJECTIVE_MAIN: tuple[MultiObjectiveTask, ...] = (
         front=enumerated_front,
         # Enumerated, not constructed: 4^10 is a fifth of the enumeration guard,
         # so IGD+ here measures coverage of the front rather than of a candidate
-        # pool. It is 5 points at this seed, against the 2 the construction gave.
+        # pool.
         front_is_exact=True,
     ),
 )
@@ -854,11 +893,10 @@ def conflict_sweep() -> tuple[MultiObjectiveTask, ...]:
     should not beat a scalar one, while `conflict = 1` is where the trade-off is
     real. A method that wins at one end and loses at the other has not won.
 
-    The rungs are placed on a measured transition rather than on round numbers --
-    see [CONFLICT_SWEEP][evogfn.benchmark.multi_objective.CONFLICT_SWEEP] for the
-    scan and for what the old spacing got wrong. Their exact fronts run 1, 1, 3,
-    3, 3 points, so the sweep now contains the point at which a trade-off starts
-    to exist instead of straddling it invisibly.
+    The rungs bracket the transition rather than sitting on round numbers -- see
+    [CONFLICT_SWEEP][evogfn.benchmark.multi_objective.CONFLICT_SWEEP] for how
+    they were placed -- so the sweep contains the point at which a trade-off
+    starts to exist instead of straddling it invisibly.
 
     Returns:
         One task per conflict value.
@@ -891,15 +929,15 @@ def objective_count_sweep() -> tuple[MultiObjectiveTask, ...]:
 
     The other explanatory axis. Cost is expected to rise with the objective
     count for reasons that have nothing to do with any method -- the exact front
-    grows from 3 points at two objectives to 9 at three and 23 at four, and a
-    single preference covers proportionally less of it -- so this sweep exists to
-    separate that from anything a method is doing.
+    grows with the objective count, and a single preference covers
+    proportionally less of it -- so this sweep exists to separate that from
+    anything a method is doing.
 
-    It is also where the hypervolume column depends on the install. A 23-point
+    It is also where the hypervolume column depends on the install. A wider
     reference front means a converged arm's *measured* front can outgrow
     `EXACT_FRONT_LIMIT`, and without the optional `moo` extra there is no exact
-    method for that, so `mo-objectives-4` is the task that goes `nan` first. With
-    the extra it does not.
+    method for that, so the highest objective count is where `nan` appears
+    first. With the extra it does not.
 
     The two-objective entry is the same instance as ``mo-conflict-1.00``. Running
     both is deliberate: the two builders must produce identical numbers, and a
@@ -1322,7 +1360,7 @@ def _parts(task: Task, seed: int) -> tuple[FitnessLandscape, MutationEnvironment
 def _anchor_seed(seed: int, generation: int) -> int:
     """A distinct, reproducible seed for each anchor a campaign moves to.
 
-    The same mechanism, and for the same measured reason, as
+    The same mechanism, and for the same reason, as
     `evogfn.benchmark.methods._anchor_seed`. A sampler rebuilt from a factory
     starts from its constructor and therefore from its seed, so a sampler
     re-seeded identically at every anchor proposes the identical pool at every
@@ -1389,7 +1427,10 @@ def _campaign(  # noqa: PLR0913 - a campaign is defined by its protocol
             fitted to, and the anchor follows.
         rounds: Design-build-test-learn cycles for this campaign.
         batch_size: Variants measured per round.
-        pool_size: Candidates generated per round before selection.
+        pool_size: Candidates generated per round before selection, or
+            `PLATE_POOL` for exactly the plate this campaign measures. Passed in
+            rather than computed here because it is the method's published
+            population, not a harness setting.
 
     Returns:
         The campaign, which refuses at construction if the acquisition rule
@@ -1404,7 +1445,7 @@ def _campaign(  # noqa: PLR0913 - a campaign is defined by its protocol
         selector=TopK(),
         rounds=rounds,
         batch_size=batch_size,
-        pool_size=pool_size,
+        pool_size=(batch_size if pool_size == PLATE_POOL else pool_size),
         # Passed explicitly, never taken from the landscape: see
         # [MultiObjectiveTask][evogfn.benchmark.multi_objective.MultiObjectiveTask].
         reference_point=np.asarray(task.reference_point, dtype=np.float64),
@@ -1415,40 +1456,113 @@ def _campaign(  # noqa: PLR0913 - a campaign is defined by its protocol
     )
 
 
-def random_arm() -> MultiObjectiveMethodology:
-    """Mutagenesis with no model and no memory: the floor.
+def classical_arm(
+    build: Callable[[MutationEnvironment, int], Sampler],
+    *,
+    surrogate: bool = False,
+    proxy_access: bool = False,
+    pool_size: int = PLATE_POOL,
+) -> MultiObjectiveMethodology:
+    """A classical baseline under a stated trade-off, bare or with a named rung.
 
-    A hypervolume with nothing below it is a number rather than a result, and
-    this is what puts something below it. It is also the arm that says how much
-    of a front is available for free on a given task -- on a low-conflict
-    instance that can be most of it.
+    The multi-objective twin of
+    [classical][evogfn.benchmark.methods.classical], down to the argument names,
+    so that `genetic+screen` means the same thing in both suites and a reader can
+    put the two tables side by side. The defaults are the published pipeline: no
+    surrogate, no proxy, and a pool the size of the plate. Anything past that is
+    something a caller asks for by name, and every arm that asks says so in its
+    own name -- which is what stops the headline comparison from being a
+    comparison between hybrids.
+
+    Every sampler built here is wrapped in
+    [ScalarizedObserving][evogfn.benchmark.multi_objective.ScalarizedObserving],
+    unconditionally rather than only where the inner sampler would refuse an
+    objective matrix. For a sampler that ignores its measurements the wrapper is
+    the identity, and paying that nothing buys the property the ladder needs: the
+    trade-off a rung breeds under is fixed by *this* function, so no rung can add
+    a scalarisation as well as the thing it is named for. It also keeps the
+    sampler names in the ledger reading alike across the ladder.
+
+    Args:
+        build: Makes the sampler from an environment and a seed.
+        surrogate: Whether a surrogate screens the proposal pool. This is the
+            ``+screen`` rung: the model, fitted to the *scalarised*
+            measurements, filters what gets measured while the search stays
+            blind.
+        proxy_access: Whether the sampler may also *optimise* against that
+            surrogate through
+            [ProxyOptimising][evogfn.algorithms.inner_loop.ProxyOptimising], as
+            the GFlowNet does. This is the ``+search`` rung, and it is what
+            separates "the surrogate won" from "the constructive sampler won".
+            An attribution question, so it belongs to a named decomposition row
+            rather than to every arm silently.
+        pool_size: Candidates per proposal call, defaulting to one plate. A
+            screened arm needs more than a plate or there is nothing to screen.
 
     Returns:
         An arm.
     """
 
     def arm(task: Task, seed: int) -> Campaign:
-        landscape, env, _ = _parts(task, seed)
+        landscape, env, ensemble = _parts(task, seed)
         preference = preference_vectors(landscape.n_objectives, 1)[0]
+        # One proxy for the whole campaign, closed over rather than rebuilt: it
+        # wraps the surrogate instance the campaign refits in place, and a fresh
+        # one per anchor would still see the same model while making that
+        # dependence look accidental.
+        proxy = (
+            ProxyLandscape(ensemble, alphabet=env.alphabet, sequence_length=env.sequence_length)
+            if proxy_access
+            else None
+        )
         generation = itertools.count()
 
         def make(anchored: MutationEnvironment) -> Sampler:
-            """Build mutagenesis against whichever anchor the campaign is at."""
-            return RandomMutagenesis(anchored, seed=_anchor_seed(seed, next(generation)))
+            """Build the baseline against whichever anchor the campaign is at."""
+            stream = _anchor_seed(seed, next(generation))
+            sampler = build(anchored, stream)
+            return ScalarizedObserving(
+                sampler if proxy is None else ProxyOptimising(sampler, proxy=proxy),
+                scalarization=WeightedSum(),
+                preference=preference,
+            )
 
         return _campaign(
             _as_multi_objective(task),
             landscape,
             env,
             make,
-            None,
+            ensemble if surrogate else None,
             preference=preference,
             rounds=task.protocol.rounds,
             batch_size=task.protocol.batch_size,
-            pool_size=max(DEFAULT_POOL, task.protocol.batch_size * UNSELECTED_POOL_PLATES),
+            pool_size=pool_size,
         )
 
     return arm
+
+
+def _random(env: MutationEnvironment, seed: int) -> Sampler:
+    """Mutagenesis with no model and no memory: the floor.
+
+    A hypervolume with nothing below it is a number rather than a result, and
+    this is what puts something below it. It is also the arm that says how much
+    of a front is available for free on a given task.
+    """
+    return RandomMutagenesis(env, seed=seed)
+
+
+def _genetic(env: MutationEnvironment, seed: int) -> Sampler:
+    """A genetic algorithm, which is what directed evolution already is.
+
+    The incumbent rather than a strawman, and the arm every headline comparison
+    is paired against. Bare: no surrogate screening its pool, no proxy to breed
+    towards, and a population equal to the plate it fills. A weighted-sum GA is a
+    published multi-objective shape in its own right -- the scalarisation is what
+    lets a population have one order at all -- so this is a pipeline and not an
+    ablation of one.
+    """
+    return GeneticAlgorithm(env, seed=seed)
 
 
 def nsga2_arm() -> MultiObjectiveMethodology:
@@ -1468,6 +1582,15 @@ def nsga2_arm() -> MultiObjectiveMethodology:
     at construction. With no surrogate that rule never scores a pool; it supplies
     the ledger's ``best_so_far`` and the anchor, both of which every arm here
     gets identically.
+
+    Built here rather than through
+    [classical_arm][evogfn.benchmark.multi_objective.classical_arm], and this is
+    the one arm that must not be: that factory scalarises what it hands its
+    sampler, and NSGA-II is the arm whose whole content is seeing the objective
+    vectors. Wrapping it would leave a dominance-ranked population sorting one
+    weighting, which is the arm it exists to be the alternative to. It has no
+    rung on the ladder for the same reason -- ``nsga2+screen`` would rank a
+    scalarised prediction and stop being NSGA-II.
 
     Returns:
         An arm.
@@ -1497,63 +1620,16 @@ def nsga2_arm() -> MultiObjectiveMethodology:
     return arm
 
 
-def scalarized_genetic_arm() -> MultiObjectiveMethodology:
-    """A genetic algorithm optimising the scalarised proxy: the strongest control.
-
-    The multi-objective counterpart of ``genetic+proxy``, and here for the same
-    reason. A GFlowNet that only beats a baseline which never looks at the model
-    has beaten the access, not the method:
-    [ProxyOptimising][evogfn.algorithms.inner_loop.ProxyOptimising] gives the GA
-    the same unlimited free evaluations of the surrogate that training gives the
-    GFlowNet, so both spend real oracle calls only on the measured batch.
-
-    The scalarisation the GA breeds under is the same object the acquisition rule
-    ranks with, which is what stops the sampler climbing one trade-off while the
-    ledger reports another.
-
-    Returns:
-        An arm.
-    """
-
-    def arm(task: Task, seed: int) -> Campaign:
-        landscape, env, ensemble = _parts(task, seed)
-        preference = preference_vectors(landscape.n_objectives, 1)[0]
-        # One proxy for the whole campaign, closed over rather than rebuilt: it
-        # wraps the surrogate instance the campaign refits in place.
-        proxy = ProxyLandscape(ensemble, alphabet=env.alphabet, sequence_length=env.sequence_length)
-        generation = itertools.count()
-
-        def make(anchored: MutationEnvironment) -> Sampler:
-            """Build the GA, its inner loop and its scalarising adapter."""
-            stream = _anchor_seed(seed, next(generation))
-            return ScalarizedObserving(
-                ProxyOptimising(GeneticAlgorithm(anchored, seed=stream), proxy=proxy),
-                scalarization=WeightedSum(),
-                preference=preference,
-            )
-
-        return _campaign(
-            _as_multi_objective(task),
-            landscape,
-            env,
-            make,
-            ensemble,
-            preference=preference,
-            rounds=task.protocol.rounds,
-            batch_size=task.protocol.batch_size,
-            pool_size=max(DEFAULT_POOL, task.protocol.batch_size * UNSELECTED_POOL_PLATES),
-        )
-
-    return arm
-
-
-def scalarized_gflownet_arm(
+def scalarized_gflownet_arm(  # noqa: PLR0913 - the training knobs, plus the axis this suite sweeps
     preferences: int = 1,
+    objective: GFlowNetObjective | None = None,
     *,
     steps: int = DEFAULT_TRAINING_STEPS,
     beta: float = DEFAULT_BETA,
+    learn_flow: bool = False,
+    hidden_dim: int = DEFAULT_HIDDEN_DIM,
 ) -> MultiObjectiveMethodology:
-    """A trajectory-balance GFlowNet trained against the scalarised proxy.
+    """A GFlowNet trained against the scalarised proxy, under a stated objective.
 
     The method under test. The preference enters **once**, through the
     acquisition rule: the campaign fits its surrogate to
@@ -1573,14 +1649,46 @@ def scalarized_gflownet_arm(
     cycles and the comparison across counts is not confounded with a comparison
     across campaign shapes.
 
+    The training objective is a parameter, and what licenses reusing the
+    single-objective suite's answer here
+    -------------------------------------------------------------------------
+
+    Because the preference is applied before the proxy predicts anything, the
+    policy's inner learning problem is a scalar-reward GFlowNet over exactly the
+    environment the single-objective suite trains in -- see `_one_gflownet`,
+    where the reward is a plain
+    [TemperedReward][evogfn.rewards.base.TemperedReward] over a single-output
+    surrogate. Nothing about which balance condition trains that policy best is
+    multi-objective, so an objective chosen by measurement elsewhere transfers,
+    and hard-coding one here would have thrown that measurement away. The
+    default is unchanged so that no existing record changes meaning: an arm
+    built without an objective is the trajectory-balance arm it always was.
+
     Args:
         preferences: How many preference vectors to split the budget between.
+        objective: How balance violation is measured. Defaults to trajectory
+            balance, which is what `ARMS` runs and what every stored
+            multi-objective record was produced under.
         steps: Gradient steps per round, per preference. **Not** divided by the
             preference count: training is free in oracle terms and this arm is
             being compared at equal *budget*, not at equal wall clock. The
             compute it costs is recorded as ``proxy_calls`` so the trade is
             visible rather than implied.
         beta: Reward exponent.
+        learn_flow: Whether the policy gets a flow head. Required by the
+            detailed-balance family -- `SubTrajectoryBalance` included -- which
+            calls [log_flow][evogfn.models.policy.SequencePolicy.log_flow] and
+            raises without one rather than degrading into a worse trajectory
+            balance. Set by the caller alongside the objective rather than
+            inferred from it, so this module never has to know which objectives
+            are in that family.
+        hidden_dim: Width of the policy trunk, defaulting to
+            [DEFAULT_HIDDEN_DIM][evogfn.benchmark.methods.DEFAULT_HIDDEN_DIM] --
+            *imported* rather than restated, so a hyperparameter screen that
+            moves the single-objective policy's capacity moves this one too. A
+            literal here would put the one arm in this suite a screen exists to
+            configure beyond that screen's reach, and a selected width would then
+            be reported for a policy the multi-objective table never ran.
 
     Returns:
         An arm.
@@ -1612,8 +1720,11 @@ def scalarized_gflownet_arm(
                 seed,
                 index=index,
                 preference=weights[index],
+                objective=objective,
                 steps=steps,
                 beta=beta,
+                learn_flow=learn_flow,
+                hidden_dim=hidden_dim,
                 rounds=rounds,
                 batch=batch,
             )
@@ -1630,8 +1741,11 @@ def _one_gflownet(  # noqa: PLR0913 - one campaign per preference, and it needs 
     *,
     index: int,
     preference: npt.NDArray[np.float64],
+    objective: GFlowNetObjective | None,
     steps: int,
     beta: float,
+    learn_flow: bool,
+    hidden_dim: int,
     rounds: int,
     batch: int,
 ) -> Campaign:
@@ -1650,8 +1764,15 @@ def _one_gflownet(  # noqa: PLR0913 - one campaign per preference, and it needs 
         index: Which preference this is, mixed into the seed so the sub-campaigns
             do not all propose the identical opening pool.
         preference: This sub-campaign's trade-off.
+        objective: How balance violation is measured, or ``None`` for trajectory
+            balance.
         steps: Gradient steps per round.
         beta: Reward exponent.
+        learn_flow: Whether to build the policy with a flow head, which the
+            detailed-balance family needs and the others never read.
+        hidden_dim: Width of the policy trunk, passed down rather than fixed
+            here so that every preference in an ensemble is the same capacity
+            and so that a screen can move all of them at once.
         rounds: Design-build-test-learn cycles.
         batch: Variants measured per round.
 
@@ -1667,7 +1788,8 @@ def _one_gflownet(  # noqa: PLR0913 - one campaign per preference, and it needs 
         n_actions=env.n_actions,
         sequence_length=env.sequence_length,
         n_tokens=env.alphabet.size,
-        hidden_dim=128,
+        hidden_dim=hidden_dim,
+        learn_flow=learn_flow,
         seed=stream,
     )
     proxy = ProxyLandscape(ensemble, alphabet=env.alphabet, sequence_length=env.sequence_length)
@@ -1690,7 +1812,11 @@ def _one_gflownet(  # noqa: PLR0913 - one campaign per preference, and it needs 
             # two-entry preference does not fit it.
             reward=TemperedReward(beta=beta),
             config=TrainingConfig(steps=steps, batch_size=64, seed=anchor_stream),
-            objective=TrajectoryBalance(),
+            # Whatever the caller chose, and `None` is trajectory balance --
+            # decided by `GFlowNetSampler` rather than defaulted here, so this
+            # arm and `evogfn.benchmark.methods.gflownet` cannot come to
+            # disagree about what "unspecified" means.
+            objective=objective,
             seed=anchor_stream,
         )
 
@@ -1703,7 +1829,13 @@ def _one_gflownet(  # noqa: PLR0913 - one campaign per preference, and it needs 
         preference=preference,
         rounds=rounds,
         batch_size=batch,
-        pool_size=max(DEFAULT_POOL, batch * UNSELECTED_POOL_PLATES),
+        # The library, exactly as `evogfn.benchmark.methods.gflownet` gets it,
+        # rather than a pool computed from the batch: such a pool agrees with the
+        # library at every protocol this suite declares and would diverge from it
+        # under a wider plate, and two GFlowNet arms whose pools differ only on
+        # protocols nobody has run yet is a difference that shows up as a
+        # surprise rather than as a setting.
+        pool_size=DEFAULT_POOL,
     )
 
 
@@ -1730,23 +1862,110 @@ def _as_multi_objective(task: Task) -> MultiObjectiveTask:
     return task
 
 
-#: The four arms of the main and explanatory tiers, in a stable order so a report
-#: reads the same way each run.
+#: The arms of the main and explanatory tiers: four published pipelines, then
+#: three decomposition rows, in a stable order so a report reads the same way
+#: each run. Laid out to match [evogfn.benchmark.methods][]'s `BASELINES`, arm
+#: for arm where the two suites can share an arm at all:
+#:
+#: ==================  =============================  ========
+#: this suite          single-objective               pool
+#: ==================  =============================  ========
+#: ``random``          ``random``                     plate
+#: ``nsga2``           none (multi-objective only)    4 plates
+#: ``genetic``         ``genetic``                    plate
+#: ``gfn-tb``          ``gfn-tb``                     2048
+#: ``random+screen``   ``random+screen``              2048
+#: ``genetic+screen``  ``genetic+screen``             2048
+#: ``genetic+search``  ``genetic+search``             2048
+#: ==================  =============================  ========
+#:
+#: What is missing against the sibling list is missing on purpose: ``hill-climb``,
+#: ``annealing``, ``cmaes``, ``mlde`` and ``genetic-feasible`` are single-objective
+#: pipelines whose published forms say nothing about a front, and
+#: ``genetic+distinct`` is a plate rule this module's `_campaign` does not yet
+#: expose. Adding any of them is a decision about what the multi-objective table
+#: claims, not a gap to be filled quietly.
 ARMS: dict[str, MultiObjectiveMethodology] = {
-    "random": random_arm(),
+    "random": classical_arm(_random),
     "nsga2": nsga2_arm(),
-    "genetic+proxy": scalarized_genetic_arm(),
+    "genetic": classical_arm(_genetic),
     "gfn-tb": scalarized_gflownet_arm(),
+    # Ablations. Each keeps the library pool because a screen with nothing to
+    # screen is not a screen: at a plate the model would rank 96 candidates into
+    # 96 wells and change nothing at all.
+    "random+screen": classical_arm(_random, surrogate=True, pool_size=DEFAULT_POOL),
+    "genetic+screen": classical_arm(_genetic, surrogate=True, pool_size=DEFAULT_POOL),
+    "genetic+search": classical_arm(
+        _genetic, surrogate=True, proxy_access=True, pool_size=DEFAULT_POOL
+    ),
+}
+
+#: Arms that decompose a published pipeline rather than being one, mapped to the
+#: pipeline they decompose. The same registry
+#: ``experiments/run_suite.py`` keeps, held here rather than there so that the
+#: two suites' reports cannot come to disagree about which of their rows is a
+#: yardstick -- and so that adding a rung to `ARMS` without saying what it
+#: decomposes is a visible omission.
+ABLATIONS: dict[str, str] = {
+    "random+screen": "random",
+    "genetic+screen": "genetic",
+    "genetic+search": "genetic",
+}
+
+#: Arms whose name would be read as a stronger claim than the arm supports, and
+#: the sentence a report has to print beside them. ``gfn-tb`` is the case this
+#: exists for: it is GFlowNet-AL over a *fixed* weighted-sum scalarisation, and a
+#: reader who has met MOGFN-PC will otherwise assume a preference-conditioned
+#: policy -- a different method, with a different claim, that this suite does not
+#: run. Stated in the report rather than folded into the arm's name, because the
+#: name is what every stored record is keyed by and the scope note is longer than
+#: a name should be.
+SCOPE_NOTES: dict[str, str] = {
+    "gfn-tb": (
+        "single-preference GFlowNet-AL over a fixed weighted sum; NOT MOGFN-PC, "
+        "which samples a preference per step and conditions the policy on it"
+    ),
 }
 
 
-def preference_arms() -> dict[str, MultiObjectiveMethodology]:
+def preference_arms(
+    objective: GFlowNetObjective | None = None,
+    *,
+    learn_flow: bool = False,
+    hidden_dim: int = DEFAULT_HIDDEN_DIM,
+) -> dict[str, MultiObjectiveMethodology]:
     """The same GFlowNet at each preference count, at fixed total budget.
 
+    The objective is threaded through rather than fixed, and for a reason beyond
+    symmetry: this diagnostic exists to decide how many preferences the
+    main-table arm gets, and a preference count chosen for one training
+    objective is not evidence about another. Running the diagnostic at whatever
+    the main table runs is what keeps its answer applicable to it.
+
+    Args:
+        objective: How balance violation is measured, for every count. Defaults
+            to trajectory balance.
+        learn_flow: Whether the policies get a flow head, required by the
+            detailed-balance family.
+        hidden_dim: Width of every policy's trunk. Threaded for the same reason
+            the objective is: a preference count chosen at one capacity is not
+            evidence about another, so the diagnostic has to be runnable at
+            whatever width the main table runs.
+
     Returns:
-        One arm per entry of `PREFERENCE_COUNTS`, named by the count.
+        One arm per entry of `PREFERENCE_COUNTS`, named by the count. The names
+        are fixed on the axis the tier varies and do **not** encode the
+        objective, so a diagnostic run under a non-default one is distinguished
+        by the run's configuration rather than by the arm name -- which is what
+        keeps a stored record comparable across the change, and what makes it
+        wrong to read two such runs as the same arm.
     """
-    return {f"gfn-tb-pref{count}": scalarized_gflownet_arm(count) for count in PREFERENCE_COUNTS}
+    return {
+        f"gfn-tb-pref{count}": scalarized_gflownet_arm(
+            count, objective, learn_flow=learn_flow, hidden_dim=hidden_dim
+        )
+        for count in PREFERENCE_COUNTS
+    }
 
 
 # --------------------------------------------------------------------------
@@ -1827,8 +2046,8 @@ def set_indicators(task: MultiObjectiveTask, result: CampaignResult) -> dict[str
     Where it does happen it is reported and not patched: an approximation written
     into the same column as an exact value would be indistinguishable from one,
     and the measurements survive on the result for anyone who wants to score them
-    separately. On `ch65-real` and `mo-objectives-4` this bites precisely the arms
-    that did best, which is why those tasks are read on IGD+.
+    separately. It bites the arms whose measured front is widest -- the ones that
+    converged -- which is why the tasks it can reach are read on IGD+.
 
     Args:
         task: The task being run, named in any error.
@@ -1892,8 +2111,20 @@ def run_multi_objective_task(
             continue
         started = time.perf_counter()
         for seed in outstanding:
+            # Both clocks start before the arm is built, not before `run`.
+            # Building the arm is where a surrogate is constructed and where a
+            # preference ensemble instantiates one policy per preference, and
+            # timing only the loop would credit the arms that front-load their
+            # work. `process_time` is the comparable figure: a wall clock also
+            # records whatever else the machine was doing, which is a property of
+            # the machine rather than of any method.
+            cpu_started = time.process_time()
+            wall_started = time.perf_counter()
             campaign = arm(task, seed)
             result = campaign.run()
+            cpu_seconds = time.process_time() - cpu_started
+            wall_seconds = time.perf_counter() - wall_started
+            method_sampler = campaign.sampler
             feasible = (
                 float(landscape.is_feasible(result.sequences).mean())
                 if len(result.sequences)
@@ -1920,6 +2151,31 @@ def run_multi_objective_task(
                     oracle_calls=result.oracle_calls,
                     proposals=result.proposals,
                     proxy_calls=_proxy_calls(campaign),
+                    # By attribute, exactly as `evogfn.benchmark.suite.run_task`
+                    # reads them: a sampler that breeds nothing simply does not
+                    # carry these, and asking the base interface for them would
+                    # make every baseline declare a quantity one method measures.
+                    # Read off the campaign's *last* sampler, which for a
+                    # preference ensemble is the last preference's -- see
+                    # `PreferenceEnsemble.sampler`. That understates a
+                    # genetic teacher's output by the ensemble size, and it is
+                    # accepted rather than summed because no arm in `ARMS` breeds
+                    # inside an ensemble today; an MO Genetic-GFN would have to
+                    # sum these the way `_proxy_calls` already sums its column.
+                    bred_designs=int(getattr(method_sampler, "bred_designs", 0)),
+                    unconstructible_fraction=float(
+                        getattr(method_sampler, "unconstructible_fraction", 0.0)
+                    ),
+                    cpu_seconds=cpu_seconds,
+                    wall_seconds=wall_seconds,
+                    # Also by attribute, and from the campaign rather than the
+                    # sampler: a run against a result that does not report it
+                    # stores zero, which is the honest reading for a sampler that
+                    # cannot repeat itself. It is the column that says what the
+                    # plate rule cost -- a plate-sized pool is only a fair
+                    # population if the repeats it produces are charged, and this
+                    # is where that shows.
+                    duplicate_fraction=float(getattr(result, "duplicate_fraction", 0.0)),
                     deterministic=is_deterministic(),
                     top_sequences=_front_designs(result),
                     trace=result.trace(),

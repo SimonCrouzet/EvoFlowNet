@@ -16,6 +16,7 @@ from evogfn.algorithms.base import Sampler
 from evogfn.core.types import Alphabet
 from evogfn.landscapes.base import FitnessLandscape
 from evogfn.loop import Campaign
+from evogfn.metrics.pareto import pymoo_available
 from evogfn.rewards.scalarization import Tchebycheff, WeightedSum
 from evogfn.surrogate import DeepEnsemble
 
@@ -289,10 +290,8 @@ class TestHypervolumeRises:
         result = campaign(surrogate=surrogate(), reference_point=[float(LENGTH), float(LENGTH)])
         assert result.run().hypervolume == pytest.approx(0.0)
 
-    def test_a_front_too_large_for_the_exact_method_reports_nan(self):
-        # An exact indicator that refuses is better than an approximate one that
-        # does not announce itself -- but refusing must not throw away a
-        # campaign's measurements, so it is nan here and the values survive.
+    def _large_front_run(self):
+        """A three-objective campaign whose front outgrows inclusion-exclusion."""
         result = campaign(
             ThreeAntigenLandscape(),
             surrogate=surrogate(),
@@ -302,7 +301,26 @@ class TestHypervolumeRises:
             reference_point=[-1.0, -1.0, -1.0],
         ).run()
         assert result.values.shape[0] == 256
-        assert np.isnan(result.hypervolume_trace()[-1])
+        return result
+
+    @pytest.mark.skipif(
+        pymoo_available(), reason="with the `moo` extra no front is too large to compute"
+    )
+    def test_a_front_too_large_for_the_exact_method_reports_nan(self):
+        # What a core numpy+torch install does. An exact indicator that refuses
+        # is better than an approximate one that does not announce itself -- but
+        # refusing must not throw away a campaign's measurements, so it is nan
+        # here and the values survive.
+        assert np.isnan(self._large_front_run().hypervolume_trace()[-1])
+
+    @pytest.mark.skipif(not pymoo_available(), reason="needs the optional `moo` extra")
+    def test_the_same_front_is_a_number_with_the_moo_extra_installed(self):
+        # And what the extra buys: the same campaign, still exact, no gap. This
+        # is the front size a converged arm reaches, so without it the column
+        # goes missing for the runs that did best.
+        volume = self._large_front_run().hypervolume_trace()[-1]
+        assert not np.isnan(volume)
+        assert volume > 0.0
 
 
 class TestTheSingleObjectiveResultDidNotMove:
@@ -350,6 +368,7 @@ class TestTheSingleObjectiveResultDidNotMove:
             "proposals",
             "best_value",
             "feasible_fraction",
+            "duplicate_fraction",
             "rounds",
             "simple_regret",
         ]

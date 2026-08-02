@@ -15,11 +15,12 @@ What the regret column is, and what it is not
 ---------------------------------------------
 
 Regret here is against the **attainable** optimum -- what
-[evogfn.benchmark.attainable][] measured a task's search space to contain --
-rather than against the landscape's own. The two are not close. On
-``large-space`` 95% of the regret computed the old way was a floor no method
-could clear, so the part of the column that varied between arms, which is the
-only part a comparison reads, was whatever fraction was left.
+[evogfn.benchmark.attainable][] audited a task's search space to contain --
+rather than against the landscape's own. Regret against the landscape's optimum
+carries a floor no method can clear, because the optimum need not sit inside the
+space the protocol lets a method search. That floor is constant across arms, so
+it contributes nothing a comparison can read and everything a reader can
+misread.
 
 Where the audit could not close the bracket, the interval is printed and the
 regret is against its conservative end. A regret at or below zero therefore does
@@ -28,6 +29,36 @@ construct, and the task has no demonstrated headroom left to separate it from a
 better method with. Those arms are named as **solved**, and comparisons drawn on
 them are marked vacuous rather than quietly reported -- a p-value against an arm
 sitting on the ceiling is a statement about the ceiling.
+
+What every arm is compared against
+----------------------------------
+
+The reference is `genetic`: the Ehrlich paper's own algorithm at its own
+hyperparameters. Methods are compared **as published**, because a published
+pipeline is what a lab actually chooses between. Pairing against
+`genetic+search` instead -- a genetic algorithm handed the campaign's surrogate
+-- would pair every headline number against something nobody proposed and no lab
+runs.
+
+`genetic+search` and `random+screen` stay in the table as **ablations** -- they
+are the only thing separating "the surrogate won" from "the constructive sampler
+won" -- but they are decomposition rows, not controls, and they are labelled as
+such on every line they appear on. A reader who takes one for the yardstick is
+reading exactly the comparison the reference change was made to stop.
+
+Why proxy spend is printed beside the win
+-----------------------------------------
+
+Proxy calls are a *chosen* budget, not a constant of an architecture: the
+GFlowNet's is ``steps x batch_size`` per round, the `genetic+search` ablation's is
+``generations x population``. Let those differ by an order of magnitude and the
+regret column is measuring compute rather than method. So the cost is printed
+next to the win: a GFlowNet needing 10x the proxy calls is a real and publishable
+cost of the method, and the column is where a reader finds it rather than
+something to be inferred from a configuration file. One caveat, from
+[evogfn.benchmark.methods][]: a sampler rebuilt at an anchor move restarts its own
+accounting, so on a re-anchoring task the stored count covers the last anchor's
+rounds rather than the campaign's, and reads as a floor.
 """
 
 from __future__ import annotations
@@ -58,7 +89,7 @@ from evogfn.benchmark.suite import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from evogfn.benchmark.attainable import AttainableOptimum
     from evogfn.benchmark.store import RunRecord
@@ -108,7 +139,8 @@ def tiers(main_seeds: int, diagnostic_seeds: int) -> list[Tier]:
         Tier(
             "budget-gradient", budget_gradient(), tuple(range(diagnostic_seeds)), Purpose.DIAGNOSTIC
         ),
-        # Last: ~200s a campaign at L=256, and fewer seeds for the same reason.
+        # Last, and on fewer seeds for the same reason: a campaign at L=256
+        # costs far more than one on the cheap tiers.
         Tier("large-space", expensive, tuple(range(LARGE_SPACE_SEEDS)), Purpose.BENCHMARK),
     ]
 
@@ -133,10 +165,21 @@ def selected_gflownet() -> dict[str, object]:
     if not CHOICE_FILE.exists():
         return {}
     choice = json.loads(CHOICE_FILE.read_text())
+    missing = [key for key in ("objective", "arm", "beta", "steps") if key not in choice]
+    if missing:
+        # Loudly, rather than falling back to the untuned defaults. A file
+        # written by a selection that stopped partway describes a configuration
+        # no rule ever chose, and running the defaults instead would produce a
+        # headline table that silently disagrees with the selection page.
+        raise ValueError(
+            f"{CHOICE_FILE} is missing {', '.join(missing)}, so the selection it "
+            f"records is unfinished; run experiments/select_configuration.py to "
+            f"completion, or delete the file to benchmark the untuned defaults"
+        )
     arm = str(choice["arm"])
-    objective = str(choice["objective"])
-    beta = float(arm.rsplit("-", 1)[1])
-    return {arm: _build_objective(objective, beta)}
+    return {
+        arm: _build_objective(str(choice["objective"]), float(choice["beta"]), int(choice["steps"]))
+    }
 
 
 def methods_for(tier: Tier) -> dict[str, object]:
@@ -229,10 +272,23 @@ REFERENCES = {
     "objectives": "gfn-tb",
 }
 
-#: The strongest control: a genetic algorithm with the same proxy access the
-#: GFlowNet gets. Comparing against a method that only meets the model as a
-#: filter would not be a comparison of methods.
-DEFAULT_REFERENCE = "genetic+proxy"
+#: The Ehrlich paper's own algorithm, at its own hyperparameters. The reference
+#: has to be a *published pipeline*, because a pipeline is what a lab chooses
+#: between; pairing against `genetic+search` instead would pair every headline
+#: number against a hybrid we invented, and no reviewer has to accept a win over
+#: that.
+DEFAULT_REFERENCE = "genetic"
+
+#: Arms that decompose a published pipeline rather than being one, mapped to the
+#: pipeline they decompose. They answer "was it the surrogate or the sampler?",
+#: which is a real question and the first one a reviewer asks -- but it is an
+#: attribution question, and its answer belongs in a decomposition row. Naming
+#: them in the table is what keeps a reader from reading one as the yardstick:
+#: drop this and `genetic+search` looks like just another baseline that lost.
+ABLATIONS = {
+    "genetic+search": "genetic",
+    "random+screen": "random",
+}
 
 
 def reference_for(tier: Tier, methods: dict[str, object]) -> str | None:
@@ -257,15 +313,17 @@ def report(store: ResultStore, tier: Tier, reference: str | None = None) -> str:
     Regret is read straight from the records, where it is already against the
     attainable optimum -- see `evogfn.benchmark.suite._scores`. What this adds is
     the context that makes it readable: the interval the task can reach, how many
-    of an arm's seeds are sitting on it, and a refusal to present a paired
-    comparison drawn on a solved task as though it ranked anything.
+    of an arm's seeds are sitting on it, what each arm spent to get there, which
+    rows are ablations rather than published pipelines, and a refusal to present a
+    paired comparison drawn on a solved task as though it ranked anything.
 
     Args:
         store: Where results live.
         tier: The tier to report on.
         reference: Arm to compare against. Defaults to whatever
-            `reference_for` picks for this tier. ``None`` where the tier has no
-            arm that can serve, which is reported rather than passed over.
+            `reference_for` picks for this tier -- `DEFAULT_REFERENCE`, a
+            published pipeline, outside the diagnostics. ``None`` where the tier
+            has no arm that can serve, which is reported rather than passed over.
 
     Returns:
         A multi-line report.
@@ -280,24 +338,8 @@ def report(store: ResultStore, tier: Tier, reference: str | None = None) -> str:
         lines.append(_attainable_line(attainable))
         held = {name: store.usable(task.name, name) for name in names}
         seeds = [s for s in tier.seeds if all(s in held[n] for n in names if held[n])]
-        solved = set()
-        for name in names:
-            records = held[name]
-            if not records:
-                continue
-            regret = records_to_metric(records, tier.seeds, "regret")
-            feasible = records_to_metric(records, tier.seeds, "feasible_fraction")
-            spread = records_to_metric(records, tier.seeds, "diversity")
-            spent = records_to_metric(records, tier.seeds, "oracle_calls")
-            error = regret.std(ddof=1) / len(regret) ** 0.5 if len(regret) > 1 else 0.0
-            share = _at_optimum(records, attainable)
-            if share >= VACUOUS_SHARE:
-                solved.add(name)
-            lines.append(
-                f"  {name:<18} regret {regret.mean():>7.3f} +/- {error:<6.3f} "
-                f"at-opt {share:>5.2f}  feas {feasible.mean():>5.3f}  "
-                f"div {spread.mean():>5.2f}  spent {spent.mean():>6.0f}  n={len(regret)}"
-            )
+        rows, solved = _arm_rows(held, names, tier.seeds, attainable)
+        lines.extend(rows)
         for name in sorted(solved):
             lines.append(
                 f"  SOLVED  {name} sits on the attainable optimum "
@@ -308,6 +350,61 @@ def report(store: ResultStore, tier: Tier, reference: str | None = None) -> str:
 
         lines.extend(_paired(held, names, seeds, reference, solved))
     return "\n".join(lines)
+
+
+def _arm_rows(
+    held: Mapping[str, Mapping[int, RunRecord]],
+    names: list[str],
+    seeds: Sequence[int],
+    attainable: AttainableOptimum | None,
+) -> tuple[list[str], set[str]]:
+    """One line per arm, and which arms turned out to be sitting on the ceiling.
+
+    Split out of `report` rather than inlined: `report` was already at the branch
+    limit, and the alternative to a helper is a table nobody may add a column to.
+
+    The `proxy` column is the point of the split. Proxy spend is a budget someone
+    chose -- ``steps x batch_size`` for the GFlowNet, ``generations x population``
+    for the `genetic+search` ablation -- so an arm that wins on regret while
+    spending an order of magnitude more surrogate evaluations has won on compute,
+    and printing the two side by side is the only place a reader would see that.
+
+    Args:
+        held: Stored records by arm.
+        names: The arms, in report order.
+        seeds: The tier's seeds, fixing the order metrics are pulled in.
+        attainable: What the task can reach, or ``None`` when unaudited.
+
+    Returns:
+        The report lines, and the arms whose share of seeds on the attainable
+        optimum is at or above `VACUOUS_SHARE` -- returned rather than recomputed
+        by the caller, since recomputing it is how the table and the comparison
+        below it drift into disagreeing about which arms are solved.
+    """
+    lines, solved = [], set()
+    for name in names:
+        records = held[name]
+        if not records:
+            continue
+        regret = records_to_metric(records, seeds, "regret")
+        feasible = records_to_metric(records, seeds, "feasible_fraction")
+        spread = records_to_metric(records, seeds, "diversity")
+        spent = records_to_metric(records, seeds, "oracle_calls")
+        proxy = records_to_metric(records, seeds, "proxy_calls")
+        error = regret.std(ddof=1) / len(regret) ** 0.5 if len(regret) > 1 else 0.0
+        share = _at_optimum(records, attainable)
+        if share >= VACUOUS_SHARE:
+            solved.add(name)
+        # On the row itself, not in a footnote: a decomposition row sitting
+        # unmarked among published pipelines is read as one of them.
+        mark = f"  [ablation of {ABLATIONS[name]}]" if name in ABLATIONS else ""
+        lines.append(
+            f"  {name:<18} regret {regret.mean():>7.3f} +/- {error:<6.3f} "
+            f"at-opt {share:>5.2f}  feas {feasible.mean():>5.3f}  "
+            f"div {spread.mean():>5.2f}  spent {spent.mean():>6.0f}  "
+            f"proxy {proxy.mean():>7.0f}  n={len(regret)}{mark}"
+        )
+    return lines, solved
 
 
 def _paired(
@@ -330,7 +427,8 @@ def _paired(
         Report lines, including a line naming the omission when there is
         nothing to compare against -- an absent section reads as "nothing
         separated these arms", which is a different statement from "nothing
-        was tested".
+        was tested" -- and a line marking every ablation, whose comparison
+        against a published pipeline is an attribution and not a ranking.
     """
     if reference is None:
         return ["  no reference arm in this tier, so nothing is paired"]
@@ -347,6 +445,15 @@ def _paired(
             continue
         outcome = compare(name, mine, theirs, higher_is_better=False)
         lines.append(f"    {outcome!r}")
+        # Marked here as well as in the table above: read on its own, an
+        # ablation's line is a p-value against a published pipeline, and that is
+        # a claim about methods rather than the attribution claim it supports.
+        if decomposes := ABLATIONS.get(name):
+            lines.append(
+                f"        attribution: decomposes {decomposes}; separates the "
+                f"surrogate's contribution from the sampler's, and ranks no "
+                f"method a lab could run"
+            )
         # Said before the p-value is read rather than after: an arm on the
         # ceiling makes the difference a measurement of the ceiling, and
         # significance there is significance about the task.
