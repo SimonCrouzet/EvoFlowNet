@@ -33,6 +33,7 @@ sitting on the ceiling is a statement about the ceiling.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
 from pathlib import Path
@@ -42,6 +43,7 @@ import numpy as np
 
 from evogfn.benchmark.determinism import configure_determinism, is_deterministic
 from evogfn.benchmark.methods import BASELINES, OBJECTIVES, flow_objectives, sensitivity
+from evogfn.benchmark.selection import _build_objective
 from evogfn.benchmark.statistics import compare, seeds_needed
 from evogfn.benchmark.store import ResultStore
 from evogfn.benchmark.suite import (
@@ -111,6 +113,32 @@ def tiers(main_seeds: int, diagnostic_seeds: int) -> list[Tier]:
     ]
 
 
+#: Where the selection phase records the configuration it chose.
+CHOICE_FILE = Path("results/selected.json")
+
+
+def selected_gflownet() -> dict[str, object]:
+    """The GFlowNet arm the selection phase chose, if it has run.
+
+    Reading the decision rather than re-deriving it matters: re-deriving would
+    silently pick a different arm the moment a seed count or an arm list moved,
+    and the table would then report a configuration no selection ever chose.
+
+    Returns:
+        A single-entry mapping, or an empty one when no selection has been
+        recorded -- in which case the caller falls back to the untuned defaults
+        and says so, rather than quietly benchmarking them as though they had
+        been chosen.
+    """
+    if not CHOICE_FILE.exists():
+        return {}
+    choice = json.loads(CHOICE_FILE.read_text())
+    arm = str(choice["arm"])
+    objective = str(choice["objective"])
+    beta = float(arm.rsplit("-", 1)[1])
+    return {arm: _build_objective(objective, beta)}
+
+
 def methods_for(tier: Tier) -> dict[str, object]:
     """Which methodologies a tier runs.
 
@@ -123,7 +151,14 @@ def methods_for(tier: Tier) -> dict[str, object]:
         return {**OBJECTIVES, **flow_objectives()}
     if tier.name == "sensitivity":
         return dict(sensitivity())
-    return dict(MAIN_METHODS)
+    chosen = selected_gflownet()
+    if not chosen:
+        return dict(MAIN_METHODS)
+    # The selected arm replaces the untuned GFlowNet arms rather than joining
+    # them: keeping both would put two configurations of the same method in one
+    # table, and the better of the two would be the one the selection was run to
+    # avoid reporting.
+    return {**BASELINES, **chosen}
 
 
 def attainable_for(task: Task) -> AttainableOptimum | None:
@@ -336,6 +371,13 @@ def main(argv: list[str] | None = None) -> int:
         "keeps one file per task and method -- so a process per task uses the "
         "cores far better than threads do, most of the work being serial Python.",
     )
+    parser.add_argument(
+        "--method",
+        action="append",
+        help="Run only these arms. The classical baselines do not depend on which "
+        "GFlowNet configuration the selection phase picks, so they can be banked "
+        "while it is still running.",
+    )
     parser.add_argument("--seeds", type=int, default=MAIN_SEEDS, help="Seeds for main tiers.")
     parser.add_argument(
         "--diagnostic-seeds", type=int, default=DIAGNOSTIC_SEEDS, help="Seeds for diagnostics."
@@ -355,6 +397,7 @@ def main(argv: list[str] | None = None) -> int:
     selected = tiers(args.seeds, args.diagnostic_seeds)
     if args.tier:
         selected = [t for t in selected if t.name in set(args.tier)]
+    wanted_methods = set(args.method) if args.method else set()
     if args.task:
         wanted = set(args.task)
         selected = [
@@ -374,7 +417,13 @@ def main(argv: list[str] | None = None) -> int:
     started = time.perf_counter()
     for tier in selected:
         if not args.report:
-            ran = run_tier(tier, methods_for(tier), store, report=_flush)  # type: ignore[arg-type]
+            arms = methods_for(tier)
+            if args.method:
+                arms = {k: v for k, v in arms.items() if k in wanted_methods}
+                if not arms:
+                    _flush(f"{tier.name}: no arm matched --method, skipping")
+                    continue
+            ran = run_tier(tier, arms, store, report=_flush)  # type: ignore[arg-type]
             _flush(f"{tier.name}: ran {ran} campaigns")
         _flush(report(store, tier))
     _flush(f"\ntotal {time.perf_counter() - started:.0f}s")
