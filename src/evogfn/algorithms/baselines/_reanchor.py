@@ -25,9 +25,9 @@ Three kinds of state, and only one of them is anchor-relative
 * **Anchor-relative but re-projectable.** A population is a set of sequences,
   which is anchor-free, but *membership of the graph* is not: an individual 40
   substitutions from the old anchor may be outside the new anchor's budget.
-  [reprojected][evogfn.algorithms.baselines._reanchor.reprojected] pulls it back
-  in the way the breeding operators already do, and reports which rows it had to
-  change so their stale measurements can be dropped with them.
+  ``reprojected`` pulls it back in the way the breeding operators already do,
+  and reports which rows it had to change so their stale measurements can be
+  dropped with them.
 * **Anchor-relative and not re-projectable.** The pairing between a sampler's
   internal draw and the sequence it decoded to, when the decoder reads the
   anchor. CMA-ES is the case; see its own docstring. The pairing is dropped

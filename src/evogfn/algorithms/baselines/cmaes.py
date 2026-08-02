@@ -55,8 +55,7 @@ So the projection is completed rather than the method abandoned. Feasibility
 here is a **first-order chain** constraint, so the highest-scoring sequence
 subject to *both* the adjacency rule and the mutation budget is the Viterbi path
 of a dynamic program over ``(position, token, counter)``, computed exactly in
-``O(n * L * V^2 * K)`` by
-[_project_onto_constructible][evogfn.algorithms.baselines.cmaes._project_onto_constructible].
+``O(n * L * V^2 * K)`` by ``_project_onto_constructible``.
 It always succeeds, because the anchor itself is a feasible sequence at zero
 mutations, so the feasible set the projection searches is never empty. The cost
 is wall clock rather than oracle calls or proposals -- ``proposals_made`` stays
@@ -276,10 +275,9 @@ def _project_block(
 ) -> Tokens:
     """Run the projection's dynamic program over one block of rows.
 
-    Split out from
-    [_project_onto_constructible][evogfn.algorithms.baselines.cmaes._project_onto_constructible]
-    only so that the ``(rows, vocabulary, vocabulary, states)`` intermediate can
-    be bounded; the recursion is the whole of the method and lives here.
+    Split out from ``_project_onto_constructible`` only so that the
+    ``(rows, vocabulary, vocabulary, states)`` intermediate can be bounded; the
+    recursion is the whole of the method and lives here.
 
     Args:
         logits: An ``(m, length, vocabulary)`` block of per-position scores.
@@ -830,8 +828,8 @@ class CMAES(Sampler):
         cheap independent argmax followed by reverting the least-confident
         surplus substitutions is already its exact maximiser. An adjacency rule
         does not factorise, and where one is set the whole decode is handed to
-        [_project_onto_constructible][evogfn.algorithms.baselines.cmaes._project_onto_constructible]
-        instead, which solves both constraints jointly and exactly.
+        ``_project_onto_constructible`` instead, which solves both constraints
+        jointly and exactly.
 
         The unprojected argmax is decoded either way, and counted where it was
         not constructible. That costs one extra ``argmax`` and buys

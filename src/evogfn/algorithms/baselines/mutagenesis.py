@@ -286,8 +286,7 @@ class HillClimbing(Sampler):
         campaign picks its anchor through the acquisition rule over the batch,
         the climber through its own record, so the incumbent can end up outside
         the new mutation budget -- at which point every neighbour it proposed
-        would be a design the environment cannot build.
-        [carried_design][evogfn.algorithms.baselines._reanchor.carried_design]
+        would be a design the environment cannot build. ``carried_design``
         restarts it at the anchor in that case, which is the better of the two
         points anyway.
 

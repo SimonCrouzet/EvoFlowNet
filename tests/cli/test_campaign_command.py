@@ -7,6 +7,8 @@ than inspect it, and they cover the wiring most likely to rot -- the config
 groups, the sampler names, and the feasibility matrix reaching the environment.
 """
 
+import sys
+
 import pytest
 
 from evogfn.cli.main import COMMANDS, SAMPLERS, main
@@ -27,6 +29,22 @@ BASE = [
 
 def run(*overrides: str) -> int:
     return main([*BASE, *overrides])
+
+
+@pytest.fixture
+def untraced(monkeypatch):
+    """Make Hydra take the path a user gets, not the one a debugger gets.
+
+    Hydra reports a task exception one of two ways: normally it writes the
+    error to stderr and exits, but if it believes a debugger is attached it
+    re-raises so the original stack survives. Its test for "attached" is
+    `sys.gettrace() is not None`, which coverage measurement also satisfies --
+    so any test asserting on the user-facing path passes bare and fails under
+    `pytest --cov`, which is how CI runs. Reporting no trace function pins the
+    behaviour under test to the one users see; coverage keeps recording,
+    because its tracer is already installed and is not being removed.
+    """
+    monkeypatch.setattr(sys, "gettrace", lambda: None)
 
 
 class TestDispatch:
@@ -59,6 +77,7 @@ class TestSamplers:
         for sampler in SAMPLERS:
             assert run(f"sampler={sampler}", "landscape=ehrlich") == 0
 
+    @pytest.mark.usefixtures("untraced")
     def test_an_unknown_sampler_is_refused(self, tmp_path, monkeypatch, capsys):
         # Hydra catches the exception and exits, so the check is on the exit
         # rather than on the ValueError -- which is what a user actually sees.

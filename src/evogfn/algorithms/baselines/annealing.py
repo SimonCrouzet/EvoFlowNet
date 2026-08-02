@@ -163,11 +163,10 @@ class SimulatedAnnealing(Sampler):
         The chain's position, the value it sits at, and the best value it has
         seen carry for the same reason: a sequence is a sequence and a
         measurement is a measurement. Where the incumbent falls outside the new
-        budget the chain restarts at the anchor, via
-        [carried_design][evogfn.algorithms.baselines._reanchor.carried_design];
-        its accepted value is then no longer the value of where it stands, so it
-        is reset to ``-inf`` and the next finite measurement is accepted, which
-        is exactly how the chain starts. Carrying the old number instead would
+        budget the chain restarts at the anchor, via ``carried_design``; its
+        accepted value is then no longer the value of where it stands, so it is
+        reset to ``-inf`` and the next finite measurement is accepted, which is
+        exactly how the chain starts. Carrying the old number instead would
         have the Metropolis test compare candidates against a design the chain
         is no longer on.
 
