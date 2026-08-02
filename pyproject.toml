@@ -45,6 +45,25 @@ dependencies = [
 # drags this project's whole resolution backwards. It lives in its own
 # environment instead -- see notes/ for the path.
 
+# Multi-objective indicators at any front size.
+#
+# The core's exact hypervolume is inclusion-exclusion over the front, which
+# sums 2^k terms and therefore stops at 16 points in three or more objectives
+# -- a limit converged runs reach, so the column goes missing for the arms that
+# did best. pymoo's HV is exact and polynomial in the front size, and it is the
+# reference implementation the literature reports against.
+#
+# Optional, and the core must keep working without it: nothing outside
+# `evogfn.metrics.pareto` imports pymoo, and that module falls back to its own
+# exact method when the import fails. Anyone who does not run the
+# multi-objective suite keeps a numpy+torch install.
+#
+# Unlike pytorch-holo above, this one resolves: pymoo 0.6.2 installs against
+# numpy 2.x, so it does not drag the whole environment backwards.
+#
+#   uv sync --extra moo     hypervolume at any front size
+moo = ["pymoo>=0.6.2"]
+
 
 # Torch build selection. These extras add no dependency -- torch is already
 # required -- they redirect it to a specific wheel index.
@@ -205,13 +224,6 @@ convention = "google"
     "S101",    # assert is the entire point of a test
     "PLR2004", # magic values are how you write expected results
 ]
-"notebooks/**" = [
-    "D",
-    "ANN",
-    "E402",    # imports after prose cells are normal in notebooks
-    "T20",     # notebooks print
-]
-
 [tool.mypy]
 # 3.12 rather than the 3.11 floor in requires-python. numpy's bundled type stubs
 # use PEP 695 `type` statements, which mypy refuses to parse when targeting 3.11,
@@ -250,5 +262,5 @@ disallow_untyped_calls = false
 # Third-party packages that ship no type information. Listed explicitly rather
 # than globally ignoring missing imports, so a genuinely mistyped import of a
 # typed package still fails.
-module = ["hydra.*", "omegaconf.*", "wandb.*"]
+module = ["hydra.*", "omegaconf.*", "wandb.*", "pymoo.*"]
 ignore_missing_imports = true
