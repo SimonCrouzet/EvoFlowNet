@@ -7,10 +7,9 @@ tests themselves live in [evogfn.benchmark.suite][].
 
 That separation is the point, and it is enforced by there being nothing else
 here. A second list of tasks alongside the one the results come from is not
-redundant, it is wrong: this module previously carried its own suite in which
-"the feasibility task" was 32 residues while ``suite.MAIN`` runs it at 64, so
-the name meant two different experiments depending on which import a reader
-followed, and nothing in either definition said which had produced the numbers.
+redundant, it is wrong: two definitions of "the feasibility task" that differ in
+sequence length are two different experiments wearing one name, and nothing in
+either definition would say which had produced a given number.
 
 The one field a task cannot omit is `Task.purpose`. A suite is only as
 good as its ability to distinguish methods, so a row that cannot say what it
@@ -28,12 +27,12 @@ planted optimum being reachable in principle and not.
 
 That makes "what is the best value this task's search space contains" a
 question with a measured answer rather than an assumed one, and
-`Task.attainable` carries it. It is not the landscape's optimum: on the
-feasibility task the constructible set tops out at 0.375 against a nominal 1.0,
-so three quarters of every regret ever reported on it was a constant nobody had
-computed. A task that has not been audited says so by leaving `attainable`
-unset, and then no regret is stored for it at all -- an absent number being far
-safer than one measured against an unreachable target.
+`Task.attainable` carries it. It is not the landscape's optimum: where a
+feasibility constraint holds the constructible set below the nominal maximum,
+the gap between the two is a constant added to every regret on that task and
+attributable to no method. A task that has not been audited says so by leaving
+`attainable` unset, and then no regret is stored for it at all -- an absent
+number being far safer than one taken against an unreachable target.
 """
 
 from __future__ import annotations
@@ -212,7 +211,7 @@ class Task:
             searches one Hamming ball around the wild type for its whole life,
             however many rounds it runs, which on every Ehrlich landscape here
             puts a reward of 1.0 outside the search space by construction.
-        attainable: What an audit measured this task's search space to contain,
+        attainable: What an audit found this task's search space to contain,
             or ``None`` where none has been run. ``None`` is not a neutral
             default: it makes `run_task` store no regret at all, on the grounds
             that a regret against an unaudited optimum is the failure this field
@@ -249,8 +248,8 @@ class Task:
         """What this task can reach, as the audited quantity a report reads.
 
         Args:
-            nominal: The landscape's own optimum, which is the target regret was
-                reported against before anyone checked whether it was available.
+            nominal: The landscape's own optimum, which is the target regret
+                would be taken against if nobody checked it was available.
 
         Returns:
             The attainable optimum, or ``None`` for a task no audit has covered.

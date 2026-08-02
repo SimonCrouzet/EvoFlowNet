@@ -9,10 +9,8 @@ exclude the best feasible design outright.
     uv run python experiments/feasible_reachable_sweep.py --seeds 200
     uv run python experiments/feasible_reachable_sweep.py --densities 0.9 0.5
 
-This is the measurement behind that claim. It was previously an uncommitted
-script, so the numbers in the manuscript could not be re-derived by anyone --
-including their author. Everything the sweep needs is a constructor argument
-here, and the default geometry reproduces the original run exactly (see below).
+Everything the sweep needs is a constructor argument here, so any number it
+prints can be re-derived from the command that produced it.
 
 Why the two sets differ
 -----------------------
@@ -32,13 +30,12 @@ one every report of it assumes, and no amount of training reaches the difference
 Why many seeds
 --------------
 
-The original run used three. That is not enough to say anything: at a fixed
-density the exclusion measured here ranges from 0% to over 75% across seeds,
-because it depends on which adjacencies the instance forbade and where the
-parent happens to sit relative to them. A single seed at density 0.5 showed
-68.8% and another showed 12.2%. So this reports the mean, the spread and the
-range over `--seeds` instances, and counts the instances whose optimum was
-excluded rather than reporting whether one particular instance's was.
+The excluded share at a fixed density is a property of the instance, not of the
+density: it depends on which adjacencies that instance forbade and on where the
+parent happens to sit relative to them. A handful of seeds cannot separate that
+variation from the effect. So this reports the mean, the spread and the range
+over `--seeds` instances, and counts the instances whose optimum was excluded
+rather than reporting whether one particular instance's was.
 
 The default instance
 --------------------
@@ -49,15 +46,6 @@ forward search at every seed and every density. Two motifs of length two at
 quantization two, which is the smallest motif geometry that puts a partial
 reward level between 0 and 1 and so lets "the optimum is excluded" show up as a
 number rather than as a flag.
-
-At `--seeds 1` this reproduces the original ad-hoc table cell for cell:
-
-| density | ball | feasible | reachable | excluded | best feasible | best reachable |
-| --- | --- | --- | --- | --- | --- | --- |
-| 0.90 | 1789 | 1662 | 1662 | 0.0% | 1.000 | 1.000 |
-| 0.70 | 1789 | 380 | 324 | 14.7% | 1.000 | 1.000 |
-| 0.50 | 1789 | 77 | 24 | 68.8% | 1.000 | 0.500 |
-| 0.15 | 1789 | 18 | 4 | 77.8% | 1.000 | 0.500 |
 """
 
 from __future__ import annotations
@@ -76,8 +64,8 @@ if TYPE_CHECKING:
 
     from evogfn.core.types import Tokens
 
-#: Transition densities swept by default, from "barely a constraint" to
-#: "almost nothing is legal". The last two are where the exclusion appears.
+#: Transition densities swept by default, spanning "barely a constraint" to
+#: "almost nothing is legal" so the sweep brackets the regime where masking bites.
 DEFAULT_DENSITIES = (0.90, 0.70, 0.50, 0.30, 0.15)
 
 #: How much worse the best reachable design has to be before it counts as

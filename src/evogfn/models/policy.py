@@ -70,8 +70,7 @@ class SequencePolicy(nn.Module):
             which means two policies built from the same configuration differ
             -- and in a paired benchmark that silently breaks the pairing the
             statistics rest on, because "same seed" then no longer means "same
-            starting network". Measured: three runs of one configuration
-            returned 0.375, 0.375 and 0.25 before this existed.
+            starting network".
         learn_flow: Whether to estimate a state flow ``log F(s)``. Needed by
             the detailed-balance family, which constrains flow through each
             *state*; trajectory balance constrains whole trajectories and does

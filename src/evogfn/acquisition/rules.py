@@ -338,8 +338,8 @@ class DiverseTopK(BatchSelector):
     is exactly [TopK][evogfn.acquisition.rules.TopK], which makes the comparison
     a single knob rather than two implementations.
 
-    This is the component experiment E4 turns on: whether the value of spreading
-    a batch grows with its size, which is the question the two published nulls
+    Having the penalty as a single knob is what makes the value of spreading a
+    batch testable against batch size -- the question the two published nulls
     left open by testing only single-point acquisition.
 
     Args:

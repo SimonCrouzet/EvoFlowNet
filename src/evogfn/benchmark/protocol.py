@@ -114,8 +114,8 @@ WET_LAB_PROTOCOLS: tuple[Protocol, ...] = (
     Protocol(rounds=4, batch_size=PLATE, label="four plates"),
 )
 
-#: The machine-learning convention, included so the gap can be measured rather
-#: than asserted. Running it alongside a wet-lab protocol is the whole of C5.
+#: The machine-learning convention, included so the gap to a wet-lab budget can
+#: be measured rather than asserted.
 ML_CONVENTION: tuple[Protocol, ...] = (
     Protocol(rounds=10, batch_size=100, label="AdaLead/PEX/DyNA-PPO"),
     Protocol(rounds=10, batch_size=128, label="delta-CS/SILO"),
@@ -126,10 +126,10 @@ ML_CONVENTION: tuple[Protocol, ...] = (
 def round_sweep(budget: int, *, batch_size: int = PLATE) -> tuple[Protocol, ...]:
     """Protocols that spend the same budget over different numbers of rounds.
 
-    The one experiment nobody has run at a three-digit budget. MOL_GA found
-    generation size 5 beat 100 at a fixed 10,000; SimDMTA and de Boer found
-    nothing. The disagreement tracks how data-rich the first round is, which
-    predicts the effect is largest exactly where the wet lab operates.
+    The one experiment nobody has run at a three-digit budget: the published
+    work that varies round shape at a fixed budget disagrees about whether it
+    matters at all. The disagreement tracks how data-rich the first round is,
+    which predicts the effect is largest exactly where the wet lab operates.
 
     Args:
         budget: Total oracle calls to hold fixed.

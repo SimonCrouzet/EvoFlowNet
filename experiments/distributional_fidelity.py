@@ -2,11 +2,9 @@ r"""Does the policy sample $p^*(x) \propto R(x)^\beta$, or merely climb well?
 
 Every other metric this project reports -- best found, top-K, regret, even
 diversity -- is satisfiable by an optimiser that never samples anything. The
-exact L1 against the enumerated target is the one measurement that is not, and
-until now it existed only as an assertion inside
-``tests/algorithms/test_trajectory_balance.py``. A pass/fail buried in a test
-suite is not a result: it cannot be compared across objectives, it carries no
-spread, and nobody reading the manuscript ever sees the number.
+exact L1 against the enumerated target is the one measurement that is not. The
+same condition asserted as a pass/fail in a test suite cannot be compared across
+objectives and carries no spread, which is why it is reported as a number here.
 
     uv run python experiments/distributional_fidelity.py
     uv run python experiments/distributional_fidelity.py --seeds 5 --steps 4000
@@ -19,15 +17,14 @@ Why the floor, and not the L1 alone
 -----------------------------------
 
 Drawing $m$ samples from a distribution does not reproduce it. A *perfect*
-sampler shows a non-zero L1 at any finite $m$, so an L1 of 0.06 is
-uninterpretable on its own -- it could be a well-fitted policy or a badly
-measured one. Every number here is therefore printed as a multiple of what a
-sampler drawing from the target itself would show at the same sample count. A
-ratio near 1 means "indistinguishable from exact"; the raw L1 alone means
-nothing.
+sampler shows a non-zero L1 at any finite $m$, so a small L1 is uninterpretable
+on its own -- it could be a well-fitted policy or a badly measured one. Every
+number here is therefore printed as a multiple of what a sampler drawing from
+the target itself would show at the same sample count. A ratio near 1 means
+"indistinguishable from exact"; the raw L1 alone means nothing.
 
-Which support the L1 is measured over is itself the result
-----------------------------------------------------------
+Which support the L1 is normalised over
+---------------------------------------
 
 The target must be normalised over the set the policy can actually construct.
 Under a transition constraint that is **not** the Hamming ball: mutations are
@@ -37,26 +34,23 @@ entirely (this is what ``experiments/feasible_reachable_sweep.py`` measures).
 
 Normalising over the ball instead puts target mass on designs of probability
 zero, and the L1 that comes back measures the mis-specified support rather than
-the sampler. It is not a small effect. On the instance this script defaults to,
-one measured run gave **0.570 against the ball versus 0.061 against the
-reachable support** -- a factor of nine, large enough to read as a broken
-sampler when nothing is broken at all. The script measures both and prints the
-ratio, because the failure mode is invisible unless you look for it: the ball is
-the cheap closed-form answer, it is what `enumerate_terminal_states` returns,
-and it is wrong here.
+the sampler. A correct policy is penalised twice for each such design, once for
+the mass it cannot place and once for the mass it places elsewhere, so the
+inflation is structural rather than incidental. The script computes both and
+prints the ratio, because the failure mode is invisible unless you look for it:
+the ball is the cheap closed-form answer, it is what `enumerate_terminal_states`
+returns, and it is wrong here.
 
 The instance
 ------------
 
-`L = 8` over 4 tokens within 3 substitutions: a Hamming ball of 1,789, of which
-237 are feasible and **181 constructible** -- 23.6% of the feasible set has no
-legal construction order. Two motifs of length four at quantization four give
-seven distinct reward levels, so the target is graded rather than a spike;
-matching a spike would prove nothing. Transition density 0.7, at which 0.291 of
-the ball's target mass sits on feasible designs no trajectory can build -- and
-since a correct policy is penalised twice for each of them, once for the mass it
-cannot place and once for the mass it places elsewhere, that alone accounts for
-an L1 of about 0.58 before the sampler has done anything wrong.
+`L = 8` over 4 tokens within 3 substitutions, small enough that both the ball
+and the reachable set can be enumerated exactly. Two motifs of length four at
+quantization four give a graded target rather than a spike; matching a spike
+would prove nothing. The transition density is set tight enough that a
+non-trivial share of the ball's target mass sits on feasible designs no
+trajectory can build, which is the condition the support comparison needs in
+order to have anything to show.
 """
 
 from __future__ import annotations
@@ -102,8 +96,8 @@ if TYPE_CHECKING:
     from evogfn.core.types import Tokens
 
 #: The default instance. Chosen so the reachable set is a strict subset of the
-#: feasible one -- without that, the evaluation-support result below has nothing
-#: to show -- and small enough to enumerate exactly.
+#: feasible one -- without that, the support comparison has nothing to show --
+#: and small enough to enumerate exactly.
 INSTANCE = {
     "sequence_length": 8,
     "vocab_size": 4,
@@ -128,11 +122,6 @@ OBJECTIVES: dict[str, Callable[[], GFlowNetObjective]] = {
     "subtb": SubTrajectoryBalance,
     "fl-db": ForwardLookingDetailedBalance,
 }
-
-#: The measurement quoted in the module docstring, kept beside the code that
-#: reproduces it so a reader can check the claim rather than take it.
-QUOTED_BALL_L1 = 0.570
-QUOTED_REACHABLE_L1 = 0.061
 
 
 @dataclass(frozen=True, slots=True)
@@ -367,7 +356,7 @@ def reference_report(
 def support_report(
     results: Sequence[Fidelity], space: Space, *, report: Callable[[str], None]
 ) -> None:
-    """The result about evaluation: which support the L1 is measured over.
+    """Compare the L1 over the reachable support against the L1 over the ball.
 
     Args:
         results: Every measured run.
@@ -397,14 +386,11 @@ def support_report(
             f"{(ball / reachable if reachable > 0 else float('nan')):>9.1f}x"
         )
     report(
-        f"\n  Measuring against the ball rather than the reachable support inflates the L1\n"
-        f"  roughly tenfold -- {QUOTED_BALL_L1:.3f} against {QUOTED_REACHABLE_L1:.3f} on the "
-        f"run this\n"
-        f"  script was written from. Nothing about the sampler changes between those two\n"
-        f"  numbers. The ball simply contains feasible designs that carry target mass and\n"
-        f"  have no legal construction order, so a correct policy is penalised for every\n"
-        f"  one of them, and a report using `enumerate_terminal_states` -- the cheap,\n"
-        f"  closed-form, obvious choice -- concludes the sampler is broken."
+        "\n  Nothing about the sampler changes between the two L1 columns above. The ball\n"
+        "  simply contains feasible designs that carry target mass and have no legal\n"
+        "  construction order, so a correct policy is penalised for every one of them,\n"
+        "  and a report using `enumerate_terminal_states` -- the cheap, closed-form,\n"
+        "  obvious choice -- concludes the sampler is broken."
     )
 
 

@@ -64,7 +64,9 @@ therefore says nothing about search under a mutation constraint.
 ## A task is a landscape, a protocol, and a reason to run it
 
 ```python
-Task(name=..., purpose=..., build=..., protocol=..., max_mutations=..., reanchor=..., attainable=...)
+Task(
+    name=..., purpose=..., build=..., protocol=..., max_mutations=..., reanchor=..., attainable=...
+)
 ```
 
 The field a task cannot omit is `purpose`: what this task decides that the others do not. A

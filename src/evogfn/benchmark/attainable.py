@@ -9,11 +9,11 @@ none of them could have hit, the regret column has a constant added to it, and
 the part of it that varies between arms -- the only part a comparison reads --
 is compressed into whatever is left.
 
-This module exists because that had happened here. The suite shared one
-mutation budget across tasks, and reaching reward $1.0$ on an Ehrlich instance
-means placing every residue of every motif, which is tens to hundreds of
-substitutions away from the parent. The reported regret was therefore dominated
-by a constant nobody had computed.
+This module exists because that failure is easy to walk into. Reaching reward
+$1.0$ on an Ehrlich instance means placing every residue of every motif, which
+can sit far outside the mutation budget a task runs under, and a regret column
+computed against $1.0$ regardless is then dominated by a constant nobody
+computed.
 
 What "attainable" means, and why it is often an interval
 --------------------------------------------------------
@@ -29,8 +29,9 @@ $$
 and the regret floor is $\max f - \mathrm{att}$. When $\mathcal{R}$ is small
 enough to enumerate this is a measurement, and
 [MutationEnvironment.reachable_terminal_states][evogfn.env.mutation.MutationEnvironment.reachable_terminal_states]
-makes it. It usually is not: the reachable sets in this suite run to $10^{10}$
-and $10^{13}$ designs. Reporting a searched maximum as though it were the
+makes it. It usually is not: a Hamming ball of any useful radius runs to many
+orders of magnitude more designs than can be held. Reporting a searched maximum
+as though it were the
 optimum would then be exactly the error this module was written to catch, one
 level down.
 
@@ -80,8 +81,8 @@ where $S_{ij}$ is the largest number of positions two placements of motifs $i$
 and $j$ can share *while requiring the same token there* -- computed exactly, by
 enumerating placement pairs. Since $g_i \le b_i + |D_i|$, this caps the total
 match gain. Without it the bound would be the per-motif one applied $c$ times
-over, which spends the budget once per motif and is far too generous: on the
-flagship task it is $0.42$ where the joint bound is $0.14$.
+over, which spends the whole budget once per motif and is far too generous to be
+worth stating.
 
 Maximising the product over the integer vectors $(g_1,\dots,g_c)$ that satisfy
 both constraints is then a tiny enumeration, and its value is a certified upper
@@ -134,10 +135,9 @@ if TYPE_CHECKING:
 #: Token cells the beam may hold, which is what sets its width. A fixed width
 #: is the wrong knob: the cost of a step scales with the sequence length and so
 #: does the number of substitutions that do nothing, so one number is either
-#: unaffordable at $L = 256$ or a greedy walk in disguise at $L = 32$. Measured
-#: at 48 states the diagnostic landscape's bound came out below what a stored
-#: genetic-algorithm run had already achieved on it, which is a search failure
-#: reported as a property of the task.
+#: unaffordable at $L = 256$ or a greedy walk in disguise at $L = 32$. Too narrow
+#: a beam returns a lower bound below what an ordinary search has already reached
+#: on the same task, which is a search failure reported as a property of the task.
 DEFAULT_BEAM_CELLS = 20_000
 
 #: Floor on the beam width, for the short sequences where the cell budget would
@@ -156,8 +156,9 @@ DEFAULT_PLACEMENTS = 16
 #: sparse transition matrix demands next to a residue before it can be placed.
 DEPTH_PER_RESIDUE = 4
 
-#: Beam steps without an improvement before the search stops. A budget of 248
-#: does not mean 248 useful moves, and the last two hundred cost minutes.
+#: Beam steps without an improvement before the search stops. A large mutation
+#: budget does not mean that many useful moves, and the unproductive tail is
+#: where an unpatient search spends most of its time.
 DEFAULT_PATIENCE = 6
 
 #: Largest number of placement pairs the two-motif bound will enumerate. Above
@@ -407,15 +408,14 @@ def per_round_budget(task: Task, *, rounds: int | None = None) -> int | None:
     -- travels at most ``max_mutations`` per round but *cumulatively*, so $R$
     rounds reach $R \cdot b$ substitutions from the wild type rather than $b$.
     The budget needed to put the planted optimum inside the campaign's reach is
-    then $\lceil D / R \rceil$ rather than $D$, which on the flagship task is
-    62 per round instead of 248 outright.
+    then $\lceil D / R \rceil$ rather than $D$.
 
     This is a *counting* bound and only a necessary condition. It assumes every
     round spends its whole budget travelling toward the optimum, which requires
     the re-anchoring rule to pick anchors that make progress and the feasibility
-    mask to permit them. What it is good for is settling the question the fixed
-    budget answered wrongly: whether a search radius a wet lab would recognise
-    can reach the answer at all.
+    mask to permit them. What it is good for is settling a question a single
+    fixed budget cannot: whether a search radius a wet lab would recognise can
+    reach the answer at all.
 
     Args:
         task: The task to size.
@@ -552,8 +552,8 @@ def reanchored_attainable(  # noqa: PLR0913 - the audit's knobs are its definiti
 def planted_distance(task: Task) -> int | None:
     """How many substitutions separate the parent from the planted optimum.
 
-    This is the number a shared mutation budget has to clear for regret to mean
-    anything on an Ehrlich task, and the one the suite did not check.
+    This is the number a mutation budget has to clear for regret to mean
+    anything on an Ehrlich task.
 
     Args:
         task: The task to measure.
@@ -662,9 +662,9 @@ def _bounded_reachable_optimum(
     [MutationEnvironment.reachable_terminal_states][evogfn.env.mutation.MutationEnvironment.reachable_terminal_states]
     refuses up front on the size of the Hamming ball, which is the honest bound
     on what its unbatched walk could allocate. But a sparse transition matrix
-    makes the ball a wild over-estimate of the set: on the suite's feasibility
-    task the ball holds $8 \times 10^{10}$ designs and only 26,580 are
-    constructible. Refusing there gives up an exact answer precisely where
+    makes the ball a wild over-estimate of the set -- the constructible part of
+    it can be smaller by many orders of magnitude, and enumerable when the ball
+    is not. Refusing there gives up an exact answer precisely where
     feasibility bites hardest -- which is the one place a benchmark most needs
     to know what it was really asking for.
 

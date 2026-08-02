@@ -36,48 +36,22 @@ Two limitations the report states rather than hides
 
 **Hypervolume goes missing exactly where it matters.** The exact method in
 [evogfn.metrics.pareto][] raises past 16 front points in three or more
-objectives, and on ``ch65-real`` a converged arm's 384 measurements carry a front
-of up to 19 while a random arm's carries 2--9. So the column is present for the
-arms that did badly and ``nan`` for the arms that did well, which is worse than
-useless if read as a ranking. ``ch65-real`` is read on IGD+, and the report says
-how many seeds lost their hypervolume so the gap cannot be mistaken for a run
-that failed.
+objectives, and an arm that converges carries a wider measured front than one
+that scatters. So the column can be present for the arms that did badly and
+``nan`` for the arms that did well, which is worse than useless if read as a
+ranking. ``ch65-real`` is read on IGD+, and the report says how many seeds lost
+their hypervolume so the gap cannot be mistaken for a run that failed.
 
-**The Ehrlich reference fronts are constructed, not enumerated.** A 20-letter
-alphabet is enumerable only up to L=5, so no instance in this suite has an exact
-front available; what stands in is the exact front over a declared set of
-recombinations of the objectives' planted optima. Every point in it is attained
-by a sequence that exists, so IGD+ = 0 is reachable -- but it is a *subset* of
-the true front, and an arm saturating it has covered what the construction found
-rather than the front. The report marks which tasks are in that position.
+**A reference front is only as strong as what it enumerates.** Where a task's
+space is too large to enumerate -- a 20-letter alphabet is enumerable only up to
+L=5 -- what stands in is the exact front over a declared set of recombinations of
+the objectives' planted optima. Every point in it is attained by a sequence that
+exists, so IGD+ = 0 is reachable -- but it is a *subset* of the true front, and
+an arm saturating it has covered what the construction found rather than the
+front. The report marks which tasks are in that position.
 
-What it costs, measured rather than guessed
---------------------------------------------
-
-One campaign per arm, timed on one core at the protocols the tasks declare:
-
-| task | random | nsga2 | genetic+proxy | gfn-tb |
-| --- | --- | --- | --- | --- |
-| `ch65-real` | 2s | 1s | 11s | 35s |
-| `mo-ehrlich-hard` (L=64) | 3s | <1s | 5s | 261s |
-| explanatory (L=32) | <1s | <1s | 4s | 39s |
-
-At the default seed counts that is roughly **4.4 CPU-hours** for the main tier,
-1.8 for the conflict sweep and 1.1 for the objective-count sweep.
-
-The preference diagnostic is the rest of the budget and then some: **~31
-CPU-hours**, four fifths of the suite. Training is not divided when the plate is,
-so eight preferences means eight policies each trained for the full 300 steps a
-round on an eighth of the assays -- 2,363s a seed, against 1,040s at four
-preferences and 264s at one. That asymmetry is the arm's design rather than an
-accident: the comparison is held at equal *oracle budget*, which is the
-constrained resource, and not at equal wall clock. It is also why the diagnostic
-runs at the explanatory seed count rather than the main one.
-
-Total, at the defaults: **~38 CPU-hours**. Sharding is per task and arm, since
-the store keeps one file per pair, so the critical path is the eight-preference
-arm at roughly 20 hours; ``--explanatory-seeds 10`` brings that under seven if
-the answer only needs to be directional.
+Every record stores its own ``cpu_seconds`` and ``wall_seconds``, so what the
+suite costs is a question for the store rather than for this file.
 """
 
 from __future__ import annotations
@@ -92,7 +66,9 @@ import numpy as np
 
 from evogfn.benchmark.determinism import configure_determinism, is_deterministic
 from evogfn.benchmark.multi_objective import (
+    ABLATIONS,
     EXACT_FRONT_LIMIT,
+    SCOPE_NOTES,
     MultiObjectiveTask,
     arms_for_tier,
     multi_objective_tiers,
@@ -117,11 +93,31 @@ EXPLANATORY_SEEDS = 30
 #: Where results go. Deliberately not ``results/``: see the module docstring.
 DEFAULT_RESULTS = "results-mo"
 
-#: The arm every other one is compared against -- a genetic algorithm with the
-#: same proxy access and the same stated trade-off the GFlowNet gets, so a
-#: difference against it is a difference between search methods rather than
-#: between one method that optimises the model and one that does not.
-REFERENCE_ARM = "genetic+proxy"
+#: The arm every other one is compared against: a weighted-sum genetic algorithm,
+#: bare, which is the pipeline a lab already runs and therefore the only thing a
+#: win has to be a win over. Directed evolution *is* a genetic algorithm, so this
+#: is the incumbent rather than a strawman.
+#:
+#: Deliberately not ``genetic+search`` -- the GA handed this campaign's surrogate
+#: and an inner loop over it -- which is a hybrid nobody published and would pair
+#: every headline comparison against something no reviewer has to accept. That
+#: arm is kept as a decomposition row instead, where the same convention holds as
+#: in ``experiments/run_suite.py``. It still answers "was it the surrogate or the
+#: constructive sampler?", which is the first question a reviewer asks -- but
+#: that is an attribution question, and attribution belongs in a decomposition
+#: row rather than in the yardstick.
+REFERENCE_ARM = "genetic"
+
+#: Tiers that cannot use `REFERENCE_ARM` because they do not contain it, and what
+#: they use instead. Mirrors ``experiments/run_suite.py``'s ``REFERENCES`` and
+#: exists for the reason that one does: `report` prints "nothing is paired" when
+#: the reference is absent, and a diagnostic whose whole content is a comparison
+#: between its own arms would print that every time.
+#:
+#: The preference sweep is paired against **one** preference -- the configuration
+#: the main table would run if the diagnostic came back saying the split does not
+#: pay -- so each row reads as what splitting the budget bought.
+REFERENCES = {"preferences": "gfn-tb-pref1"}
 
 #: What a tier is for, printed next to it. Kept here rather than on
 #: [Tier][evogfn.benchmark.suite.Tier] because it is a property of this suite's
@@ -171,7 +167,7 @@ def _task_note(task: Task) -> str:
     return "\n".join(lines)
 
 
-def report(store: ResultStore, tier: Tier, reference: str = REFERENCE_ARM) -> str:
+def report(store: ResultStore, tier: Tier, reference: str | None = None) -> str:
     """Read the store and compare every arm against one, paired across seeds.
 
     Hypervolume and IGD+ rather than best and regret, because that is what the
@@ -181,10 +177,25 @@ def report(store: ResultStore, tier: Tier, reference: str = REFERENCE_ARM) -> st
     wherever the exact method could not run, and a paired test over a column
     whose absences correlate with an arm's quality would be reading the absences.
 
+    Two things are printed that the numbers cannot say for themselves, both
+    mirroring `experiments/run_suite.py`:
+
+    * **which rows are ablations.** A decomposition row sitting unmarked among
+      published pipelines is read as one of them, and its p-value against the
+      reference is then read as a ranking of methods rather than as the
+      attribution it is. Marked on the row *and* under its paired outcome,
+      because either is read alone.
+    * **where an arm's name overclaims.** ``gfn-tb`` is single-preference
+      GFlowNet-AL over a fixed scalarisation, and a reader who has met MOGFN-PC
+      will assume a preference-conditioned policy unless told otherwise. See
+      [SCOPE_NOTES][evogfn.benchmark.multi_objective.SCOPE_NOTES].
+
     Args:
         store: Where results live.
         tier: The tier to report on.
-        reference: Arm to compare against.
+        reference: Arm to compare against, or ``None`` to take whichever one
+            this tier is read against -- `REFERENCE_ARM`, a published pipeline,
+            except on a tier that does not contain it. See `REFERENCES`.
 
     Returns:
         A multi-line report.
@@ -192,6 +203,8 @@ def report(store: ResultStore, tier: Tier, reference: str = REFERENCE_ARM) -> st
     role = TIER_ROLES.get(tier.name, "unstated")
     lines = [f"\n=== {tier!r} -- {role}"]
     names = list(arms_for_tier(tier))
+    if reference is None:
+        reference = REFERENCES.get(tier.name, REFERENCE_ARM)
     for task in tier.tasks:
         lines.append(f"\n{task!r}")
         lines.append(_task_note(task))
@@ -208,16 +221,25 @@ def report(store: ResultStore, tier: Tier, reference: str = REFERENCE_ARM) -> st
             uncomputed = int(np.isnan(volume).sum())
             finite = volume[np.isfinite(volume)]
             error = coverage.std(ddof=1) / len(coverage) ** 0.5 if len(coverage) > 1 else 0.0
+            # On the row itself, not in a footnote: a decomposition row sitting
+            # unmarked among published pipelines is read as one of them.
+            mark = f"  [ablation of {ABLATIONS[name]}]" if name in ABLATIONS else ""
             lines.append(
                 f"  {name:<18} igd+ {np.nanmean(coverage):>7.4f} +/- {error:<7.4f} "
                 f"hv {(finite.mean() if finite.size else float('nan')):>9.4f} "
                 f"(nan on {uncomputed}/{len(volume)})  "
                 f"div {np.nanmean(spread):>5.2f}  spent {np.nanmean(spent):>6.0f}  "
-                f"n={len(coverage)}"
+                f"n={len(coverage)}{mark}"
             )
+            if note := SCOPE_NOTES.get(name):
+                lines.append(f"        scope: {note}")
 
         base = held.get(reference)
         if not base or not seeds:
+            # Said rather than silently omitted: an absent section reads as
+            # "nothing separated these arms", which is a different statement
+            # from "nothing was tested".
+            lines.append(f"  reference {reference} has no usable seeds here, so nothing is paired")
             continue
         lines.append(f"  paired on IGD+ vs {reference} (positive favours the first):")
         for name in names:
@@ -230,6 +252,15 @@ def report(store: ResultStore, tier: Tier, reference: str = REFERENCE_ARM) -> st
             # Lower IGD+ is better, so this is a loss like regret is.
             outcome = compare(name, mine, theirs, higher_is_better=False)
             lines.append(f"    {outcome!r}")
+            # Marked here as well as in the table above: read on its own, an
+            # ablation's line is a p-value against a published pipeline, and that
+            # is a claim about methods rather than the attribution it supports.
+            if decomposes := ABLATIONS.get(name):
+                lines.append(
+                    f"        attribution: decomposes {decomposes}; separates the "
+                    f"surrogate's contribution from the sampler's, and ranks no "
+                    f"method a lab could run"
+                )
             if not outcome.significant and (needed := seeds_needed(outcome)):
                 lines.append(f"        inconclusive; ~{needed} seeds would resolve this")
     return "\n".join(lines)

@@ -3,7 +3,7 @@
 The harness exists because the alternative -- a script per experiment -- is how
 comparisons drift. Seeds get reused between arms, one arm quietly runs a
 different batch size, a method is compared against a number from a previous run
-at a different budget. Every one of those has happened in this project already.
+at a different budget. None of those announces itself in the output.
 
 Three properties it enforces
 ----------------------------
@@ -206,7 +206,20 @@ def run_benchmark(
         best, spread, spent = [], [], []
         for seed in seeds:
             campaign = build(seed, protocol)
-            run = campaign.run()
+            try:
+                run = campaign.run()
+            except RuntimeError:
+                # A sampler that cannot fill its plate raises rather than
+                # quietly measuring fewer designs, which is right: an arm
+                # compared at less than the stated budget is not being compared
+                # at the budget the table claims. Recorded here rather than
+                # propagated, because one exhausted arm must not discard the
+                # seeds every other arm has already spent -- the seed is scored
+                # as spending nothing, which `underspent` then surfaces.
+                best.append(-np.inf)
+                spread.append(0.0)
+                spent.append(0)
+                continue
             best.append(run.best_value)
             spread.append(diversity(run.sequences) if len(run.sequences) > 1 else 0.0)
             spent.append(run.oracle_calls)

@@ -2,8 +2,8 @@
 
 Regret is only a measure of a method to the extent that the optimum it is
 measured against was available to that method. This report answers, per task,
-whether it was -- and then re-reads ``results/`` and puts the regret we
-published beside the regret that survives the correction.
+whether it was -- and then re-reads ``results/`` and puts the regret against the
+nominal optimum beside the regret against the attainable one.
 
     uv run python experiments/audit_optima.py
     uv run python experiments/audit_optima.py --main-only
@@ -18,10 +18,9 @@ Two budgets, and the difference matters
 Stored records do not carry the mutation budget they ran under -- a record keeps
 `Protocol.__repr__`, which is rounds, batch size and total. So rescoring a stored
 number against today's budget would compare it against a search space it never
-had. ``--stored-budget`` names the budget the results on disk were produced at
-(4, the constant this audit exists to have caught), and the rescoring uses the
-attainable optimum computed there. The forward-looking table uses each task's
-current, per-task budget.
+had. ``--stored-budget`` names the budget the results on disk were produced at,
+and the rescoring uses the attainable optimum computed there. The
+forward-looking table uses each task's current, per-task budget.
 """
 
 from __future__ import annotations
@@ -435,8 +434,7 @@ def main(argv: list[str] | None = None) -> int:
             f"  STRANDED  {', '.join(stranded)}: the planted optimum is inside the mutation\n"
             f"            budget and still has no legal construction order, because mutations "
             f"are\n            applied one at a time and every intermediate must satisfy the "
-            f"transition\n            matrix on its own. Budget is necessary and not sufficient; "
-            f"where these\n            tasks do attain 1.0 it is via some other design entirely."
+            f"transition\n            matrix on its own. Budget is necessary and not sufficient."
         )
     if not (vacuous or anomalies or defects or stranded):
         _flush("  none: every task's budget reaches its own optimum, and no arm has exhausted one")
