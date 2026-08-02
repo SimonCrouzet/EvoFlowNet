@@ -6,7 +6,7 @@ time, and stops.
 
 It is also where feasibility lives. A constructibility constraint handed to the environment
 becomes an action mask, so infeasible designs are never generated rather than filtered
-afterwards — see [notebook 3](../notebooks.md).
+afterwards.
 
 ::: evogfn.env.base
 

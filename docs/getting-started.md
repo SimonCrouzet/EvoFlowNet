@@ -181,7 +181,7 @@ Three wrappers compose onto any landscape, and they are how a benchmark stays ho
 ```bash
 uv run pytest                       # tests
 uv run mypy                         # types, strict
-uv run ruff check --fix .           # lint (covers notebooks/ too)
+uv run ruff check --fix .           # lint
 uv run ruff format .                # format
 uv run pre-commit run --all-files   # everything CI runs, locally
 ```
@@ -194,12 +194,8 @@ uv run mkdocs serve                 # live-reloading preview on :8000
 uv run mkdocs build                 # what CI checks; `strict: true`, so a broken link fails
 ```
 
-Notebooks are `.py` "percent" scripts, so they run directly:
-
-```bash
-uv run python notebooks/01-landscapes-and-epistasis.py
-uvx jupytext --to notebook notebooks/01-landscapes-and-epistasis.py   # if you want .ipynb
-```
+To run the benchmark rather than a single campaign, see [the benchmark
+suite](benchmark.md) — it covers the tiers, the selection phase, resuming and sharding.
 
 See [`CONTRIBUTING.md`](https://github.com/SimonCrouzet/EvoGFN/blob/main/CONTRIBUTING.md)
 for conventions. The short version: public functions need Google-style docstrings that say

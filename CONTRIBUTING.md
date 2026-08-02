@@ -7,8 +7,8 @@ correctness.
 ## Setup
 
 ```bash
-git clone https://github.com/SimonCrouzet/EvoFlowNet
-cd EvoFlowNet
+git clone https://github.com/SimonCrouzet/EvoGFN
+cd EvoGFN
 uv sync                     # GPU-first: installs the CUDA build of torch
 uv run pre-commit install   # installs the pre-commit and commit-msg hooks
 ```
@@ -23,7 +23,7 @@ A CUDA environment is around 4.7GB. To keep it off the disk holding the
 checkout, point uv elsewhere:
 
 ```bash
-export UV_PROJECT_ENVIRONMENT=/somewhere/with/room/evoflownet
+export UV_PROJECT_ENVIRONMENT=/somewhere/with/room/evogfn
 ```
 
 ## The loop
@@ -89,7 +89,7 @@ wrong distribution passes a naive test suite. Please do not write that suite.
 ## Reporting things
 
 Bugs and proposals go to
-[Issues](https://github.com/SimonCrouzet/EvoFlowNet/issues). The templates ask
+[Issues](https://github.com/SimonCrouzet/EvoGFN/issues). The templates ask
 for a seed and a configuration because sampling bugs usually cannot be
 reproduced without them.
 
