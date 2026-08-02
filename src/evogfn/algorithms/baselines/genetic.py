@@ -138,8 +138,7 @@ class GeneticAlgorithm(Sampler):
         only whether each individual is still *inside the budget*, and the
         algorithm already owns the operator for putting an over-budget design
         back inside one, because its own crossover produces them every
-        generation. Re-anchoring re-uses it, through
-        [reprojected][evogfn.algorithms.baselines._reanchor.reprojected], so a
+        generation. Re-anchoring re-uses it, through ``reprojected``, so a
         carried individual is indistinguishable from one the algorithm could
         have bred.
 

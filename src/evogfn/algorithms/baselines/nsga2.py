@@ -372,13 +372,12 @@ class NSGA2(Sampler):
         method compared against that is compared against nothing.
 
         Individuals outside the new mutation budget are re-projected by
-        [reprojected][evogfn.algorithms.baselines._reanchor.reprojected], and a
-        re-projected individual is a different design, so its objective vector
-        is dropped to ``-inf`` on every objective rather than carried onto a
-        sequence it was not measured on. Ranks and crowding distances are then
-        recomputed from what is left, because a front is a property of the
-        population and both would otherwise describe the population that used to
-        be there.
+        ``reprojected``, and a re-projected individual is a different design, so
+        its objective vector is dropped to ``-inf`` on every objective rather
+        than carried onto a sequence it was not measured on. Ranks and crowding
+        distances are then recomputed from what is left, because a front is a
+        property of the population and both would otherwise describe the
+        population that used to be there.
 
         Args:
             env: The re-anchored environment.

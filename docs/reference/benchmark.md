@@ -6,6 +6,8 @@ Running comparisons so that the numbers mean what the table says they mean. See
 
 ::: evogfn.benchmark.protocol
 
+::: evogfn.benchmark.attainable
+
 ::: evogfn.benchmark.tasks
 
 ::: evogfn.benchmark.suite
