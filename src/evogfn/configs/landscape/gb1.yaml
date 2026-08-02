@@ -1,0 +1,5 @@
+_target_: evogfn.landscapes.gb1.GB1Landscape
+# The 10,639 combinations absent from the assay. 0.0 is the usual convention,
+# but absent is not the same as unfit; use nan to make it visible instead.
+unmeasured_value: 0.0
+force_download: false

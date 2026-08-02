@@ -22,7 +22,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from evoflownet.landscapes import EhrlichLandscape
+from evogfn.landscapes import EhrlichLandscape
 
 
 def reference_ehrlich(sequence, landscape):

@@ -1,0 +1,4 @@
+_target_: evogfn.tracking.wandb.WandbTracker
+project: evogfn
+name: null
+entity: null

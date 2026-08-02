@@ -3,14 +3,14 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "evoflownet"
+name = "evogfn"
 version = "0.1.0.dev0"
 description = "GFlowNets for in-silico directed evolution: sampling diverse, feasible, high-fitness protein variants."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-authors = [{ name = "EvoFlowNet Contributors" }]
+authors = [{ name = "EvoGFN Contributors" }]
 keywords = [
     "gflownet",
     "directed-evolution",
@@ -36,16 +36,42 @@ dependencies = [
     "numpy>=1.26",
     "torch>=2.4",
     "hydra-core>=1.3",
+    # Thread-pool limits that apply after the numerical libraries have loaded.
+    # The OMP_/MKL_/OPENBLAS_ environment variables are read once, when the
+    # library is dlopen'd at `import numpy`, so setting them from Python is
+    # always too late for the current process; threadpoolctl reaches into the
+    # loaded pools instead. Required rather than optional: without it the
+    # benchmark cannot verify the condition its records claim to have run
+    # under, and an unverifiable determinism flag is worse than no flag.
+    "threadpoolctl>=3.1",
 ]
 
 [project.optional-dependencies]
-# Experiment tracking. Kept optional so the library, its tests and CI never
-# require an account or API key: the default tracker writes to the console.
-wandb = ["wandb>=0.17"]
 
-# Protein language model oracles (ESM-2). Heavy and GPU-oriented; the default
-# landscapes are closed-form or table-lookup and need none of this.
-plm = ["transformers>=4.44"]
+# pytorch-holo (Stanton et al.'s own Ehrlich implementation) is deliberately
+# NOT a dependency here, optional or otherwise: it requires numpy<2.0, which
+# drags this project's whole resolution backwards. It lives in its own
+# environment instead -- see notes/ for the path.
+
+# Multi-objective indicators at any front size.
+#
+# The core's exact hypervolume is inclusion-exclusion over the front, which
+# sums 2^k terms and therefore stops at 16 points in three or more objectives
+# -- a limit converged runs reach, so the column goes missing for the arms that
+# did best. pymoo's HV is exact and polynomial in the front size, and it is the
+# reference implementation the literature reports against.
+#
+# Optional, and the core must keep working without it: nothing outside
+# `evogfn.metrics.pareto` imports pymoo, and that module falls back to its own
+# exact method when the import fails. Anyone who does not run the
+# multi-objective suite keeps a numpy+torch install.
+#
+# Unlike pytorch-holo above, this one resolves: pymoo 0.6.2 installs against
+# numpy 2.x, so it does not drag the whole environment backwards.
+#
+#   uv sync --extra moo     hypervolume at any front size
+moo = ["pymoo>=0.6.2"]
+
 
 # Torch build selection. These extras add no dependency -- torch is already
 # required -- they redirect it to a specific wheel index.
@@ -64,17 +90,17 @@ cuda = ["torch>=2.4"]
 cpu = ["torch>=2.4"]
 
 [project.urls]
-Homepage = "https://github.com/SimonCrouzet/EvoFlowNet"
-Documentation = "https://simoncrouzet.github.io/evoflownet"
-Repository = "https://github.com/SimonCrouzet/EvoFlowNet"
-Issues = "https://github.com/SimonCrouzet/EvoFlowNet/issues"
+Homepage = "https://github.com/SimonCrouzet/EvoGFN"
+Documentation = "https://simoncrouzet.github.io/evogfn"
+Repository = "https://github.com/SimonCrouzet/EvoGFN"
+Issues = "https://github.com/SimonCrouzet/EvoGFN/issues"
 
 [project.scripts]
-evoflownet = "evoflownet.cli.main:main"
+evogfn = "evogfn.cli.main:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/evoflownet"]
-# The YAML under src/evoflownet/configs is picked up by the packages entry
+packages = ["src/evogfn"]
+# The YAML under src/evogfn/configs is picked up by the packages entry
 # above, since it lives inside the package. A force-include would duplicate it
 # and hatchling refuses to write the same path twice.
 
@@ -115,7 +141,7 @@ markers = [
 filterwarnings = ["error"]
 
 [tool.coverage.run]
-source = ["src/evoflownet"]
+source = ["src/evogfn"]
 branch = true
 
 [tool.coverage.report]
@@ -206,13 +232,6 @@ convention = "google"
     "S101",    # assert is the entire point of a test
     "PLR2004", # magic values are how you write expected results
 ]
-"notebooks/**" = [
-    "D",
-    "ANN",
-    "E402",    # imports after prose cells are normal in notebooks
-    "T20",     # notebooks print
-]
-
 [tool.mypy]
 # 3.12 rather than the 3.11 floor in requires-python. numpy's bundled type stubs
 # use PEP 695 `type` statements, which mypy refuses to parse when targeting 3.11,
@@ -251,5 +270,5 @@ disallow_untyped_calls = false
 # Third-party packages that ship no type information. Listed explicitly rather
 # than globally ignoring missing imports, so a genuinely mistyped import of a
 # typed package still fails.
-module = ["hydra.*", "omegaconf.*", "wandb.*"]
+module = ["hydra.*", "omegaconf.*", "wandb.*", "pymoo.*", "threadpoolctl"]
 ignore_missing_imports = true

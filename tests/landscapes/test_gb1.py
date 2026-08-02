@@ -10,7 +10,7 @@ with ``-m "not requires_data"``.
 import numpy as np
 import pytest
 
-from evoflownet.landscapes.gb1 import (
+from evogfn.landscapes.gb1 import (
     GB1_N_MEASURED,
     GB1_WILD_TYPE,
     GB1Landscape,

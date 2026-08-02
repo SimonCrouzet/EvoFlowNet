@@ -7,7 +7,7 @@ not read off the implementation.
 import numpy as np
 import pytest
 
-from evoflownet.metrics import (
+from evogfn.metrics import (
     cumulative_regret,
     feasible_fraction,
     simple_regret,

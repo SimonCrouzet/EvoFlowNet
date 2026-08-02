@@ -114,10 +114,10 @@ jobs:
         run: |
           python -m venv /tmp/wheelcheck
           /tmp/wheelcheck/bin/pip install --quiet dist/*.whl
-          /tmp/wheelcheck/bin/evoflownet --help
+          /tmp/wheelcheck/bin/evogfn --help
           /tmp/wheelcheck/bin/python -c "
           from importlib.resources import files
-          assert files('evoflownet.configs').joinpath('train.yaml').is_file()
+          assert files('evogfn.configs').joinpath('train.yaml').is_file()
           print('packaged configs present')
           "
 

@@ -7,7 +7,7 @@ tests check against it rather than against plausible-looking output.
 import numpy as np
 import pytest
 
-from evoflownet.landscapes import EhrlichLandscape
+from evogfn.landscapes import EhrlichLandscape
 
 
 def small(**overrides):

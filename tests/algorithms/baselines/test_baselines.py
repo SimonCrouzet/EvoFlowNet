@@ -9,14 +9,17 @@ hyperparameters are the ones its own authors published.
 import numpy as np
 import pytest
 
-from evoflownet.algorithms.base import Sampler
-from evoflownet.algorithms.baselines import (
+from evogfn.algorithms.base import Sampler
+from evogfn.algorithms.baselines import (
+    CMAES,
+    MLDE,
     GeneticAlgorithm,
     HillClimbing,
     RandomMutagenesis,
+    SimulatedAnnealing,
 )
-from evoflownet.core import Alphabet
-from evoflownet.env.mutation import MutationEnvironment
+from evogfn.core import Alphabet
+from evogfn.env.mutation import MutationEnvironment
 
 
 def make_env(length=6, symbols="ABCD", max_mutations=3, transitions=None):
@@ -128,6 +131,47 @@ class TestTheyActuallySearch:
         assert distinct < 32
 
 
+class TestHillClimbingNeighbourhood:
+    """The trajectory constraint is not a state constraint.
+
+    The environment forbids mutating a position twice along one *path*. That
+    does not make a sequence revising an earlier substitution unreachable -- it
+    is a different point in the same Hamming ball, arrived at by a different
+    path. Conflating the two forbade hill climbing from ever fixing a bad
+    substitution, and shrank its neighbourhood toward nothing as it moved, so it
+    ran out of proposals and left most of its oracle budget unspent.
+    """
+
+    def test_it_can_revise_an_existing_substitution(self):
+        env = make_env(length=4, max_mutations=4)
+        climber = HillClimbing(env, seed=0)
+        # Move it onto a design already differing at position 0.
+        climber.observe(np.array([[1, 0, 0, 0]], dtype=np.int32), np.array([[10.0]]))
+        proposals = climber.propose(400)
+        revised = (proposals[:, 0] != 0) & (proposals[:, 0] != 1)
+        assert revised.any(), "hill climbing never revised the existing mutation"
+
+    def test_every_proposal_stays_reachable(self):
+        env = make_env(length=6, max_mutations=3)
+        climber = HillClimbing(env, seed=1)
+        for _ in range(6):
+            proposals = climber.propose(64)
+            assert env.is_reachable(proposals).all()
+            climber.observe(proposals, np.arange(64, dtype=float)[:, None])
+
+    def test_the_neighbourhood_does_not_collapse_as_it_moves(self):
+        # The symptom the bug produced: a neighbourhood shrinking with every
+        # accepted move until the sampler could propose nothing new at all.
+        env = make_env(length=6, max_mutations=3)
+        climber = HillClimbing(env, seed=2)
+        sizes = []
+        for _ in range(5):
+            proposals = climber.propose(500)
+            sizes.append(len({row.tobytes() for row in np.ascontiguousarray(proposals)}))
+            climber.observe(proposals, np.arange(500, dtype=float)[:, None])
+        assert min(sizes) > 1, f"neighbourhood collapsed: {sizes}"
+
+
 class TestGeneticAlgorithm:
     def test_the_published_hyperparameters_are_the_defaults(self):
         # Stanton et al. report p_m = p_r = 1/L. Comparing against anything else
@@ -215,3 +259,130 @@ class TestReproducibility:
     def test_the_same_seed_gives_the_same_proposals(self, make):
         env = make_env()
         assert np.array_equal(make(env).propose(16), make(env).propose(16))
+
+
+#: Every baseline that actually reads its scores. RandomMutagenesis is absent
+#: because it ignores observe entirely, so there is nothing for it to misread.
+OBSERVERS = [
+    lambda env: HillClimbing(env, seed=0),
+    lambda env: GeneticAlgorithm(env, population_size=32, seed=0),
+    lambda env: SimulatedAnnealing(env, seed=0),
+    lambda env: CMAES(env, seed=0),
+    lambda env: MLDE(env, training_size=16, seed=0),
+]
+
+
+class TestMultiObjectiveValuesAreRefused:
+    @pytest.mark.parametrize("make", OBSERVERS)
+    def test_two_objectives_are_refused_rather_than_flattened(self, make):
+        # reshape(-1) on an (n, 2) array yields 2n numbers, which then zip
+        # against n sequences and pair half the batch with somebody else's
+        # score. Nothing raises and the run completes, so the only way this is
+        # ever caught is here.
+        env = make_env()
+        sampler = make(env)
+        batch = sampler.propose(4)
+        values = np.arange(8, dtype=np.float64).reshape(4, 2)
+        with pytest.raises(ValueError, match="must be scalarised"):
+            sampler.observe(batch, values)
+
+    @pytest.mark.parametrize("make", OBSERVERS)
+    def test_a_single_objective_column_is_still_accepted(self, make):
+        env = make_env()
+        sampler = make(env)
+        batch = sampler.propose(4)
+        sampler.observe(batch, toy_landscape(batch))
+
+    @pytest.mark.parametrize("make", OBSERVERS)
+    def test_a_flat_vector_is_still_accepted(self, make):
+        env = make_env()
+        sampler = make(env)
+        batch = sampler.propose(4)
+        sampler.observe(batch, toy_landscape(batch).reshape(-1))
+
+
+#: Hill climbing and annealing, both configured to respect the adjacency rule.
+LOCAL_SEARCHERS = [
+    lambda env: HillClimbing(env, feasible_only=True, seed=0),
+    lambda env: SimulatedAnnealing(env, feasible_only=True, seed=0),
+]
+
+
+class TestLocalSearchUnderAConstraint:
+    """What a hill climber and an annealer do when a neighbour is illegal.
+
+    They used to hold position: keep the current design wherever the drawn
+    neighbour violated the adjacency rule. That never raises and never emits an
+    unbuildable design, so it reads as the safe choice -- and on a sparse
+    feasible set, where all but a few percent of single substitutions are
+    illegal, it turns a plate of designs into a plate of identical copies of one
+    design. The campaign deduplicates, the round measures a single variant, and
+    the arm looks like a search that cannot move. Redrawing is the repair, and
+    the redraws are charged for.
+    """
+
+    def sparse_env(self, length=16, vocab=6, seed=0):
+        """A transition matrix sparse enough that most substitutions are illegal."""
+        rng = np.random.default_rng(seed)
+        matrix = np.zeros((vocab, vocab), dtype=np.float64)
+        order = rng.permutation(vocab)
+        matrix[order, np.roll(order, -1)] = 1.0
+        matrix[rng.random((vocab, vocab)) < 0.15] = 1.0
+        permitted = matrix > 0
+        parent = np.zeros(length, dtype=np.int32)
+        parent[0] = rng.integers(0, vocab)
+        for position in range(1, length):
+            parent[position] = rng.choice(np.flatnonzero(permitted[parent[position - 1]]))
+        return MutationEnvironment(
+            parent,
+            Alphabet.from_string("ABCDEF"[:vocab]),
+            max_mutations=length - 2,
+            transitions=matrix,
+        )
+
+    @pytest.mark.parametrize("make", LOCAL_SEARCHERS)
+    def test_every_proposal_is_still_buildable(self, make):
+        env = self.sparse_env()
+        assert env.is_reachable(make(env).propose(48)).all()
+
+    @pytest.mark.parametrize(
+        ("build", "hold"),
+        [
+            (HillClimbing, lambda env: HillClimbing(env, feasible_only=True, max_attempts=0)),
+            (
+                SimulatedAnnealing,
+                lambda env: SimulatedAnnealing(env, feasible_only=True, max_attempts=0),
+            ),
+        ],
+    )
+    def test_redrawing_fills_the_plate_that_holding_position_wasted(self, build, hold):
+        # `max_attempts=0` is exactly the old behaviour, so this is the before
+        # and after. The quantity is wasted wells: a row that came back as the
+        # design the search already stands on buys no measurement, because the
+        # campaign has measured it and deduplicates it away. Holding returns 45
+        # of 48 that way; redrawing returns 4.
+        env = self.sparse_env()
+        redrawn = build(env, feasible_only=True, seed=0).propose(48)
+        held = hold(env).propose(48)
+
+        def wasted(proposals):
+            return int((proposals == env.parent[None, :]).all(axis=1).sum())
+
+        assert wasted(held) > 40
+        assert wasted(redrawn) < 10
+
+    @pytest.mark.parametrize("make", LOCAL_SEARCHERS)
+    def test_the_redraws_are_charged_as_proposals(self, make):
+        # The cost moves from silence to the proposal counter, which is where a
+        # constraint that makes proposing expensive is supposed to show up.
+        env = self.sparse_env()
+        sampler = make(env)
+        sampler.propose(48)
+        assert sampler.proposals_made > 48
+
+    @pytest.mark.parametrize("make", LOCAL_SEARCHERS)
+    def test_an_unconstrained_search_pays_nothing_extra(self, make):
+        env = make_env(length=8, max_mutations=4)
+        sampler = make(env)
+        sampler.propose(32)
+        assert sampler.proposals_made == 32

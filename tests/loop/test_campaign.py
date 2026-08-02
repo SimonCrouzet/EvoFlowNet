@@ -6,15 +6,20 @@ are not, and no assertion about fitness would catch it -- so the accounting is
 tested harder than the optimisation.
 """
 
+import itertools
+
 import numpy as np
 import pytest
 
-from evoflownet.acquisition import DiverseTopK, ExpectedImprovement, Greedy, TopK
-from evoflownet.algorithms.base import Sampler
-from evoflownet.core.types import Alphabet
-from evoflownet.landscapes.base import FitnessLandscape
-from evoflownet.loop import Campaign
-from evoflownet.surrogate import DeepEnsemble
+from evogfn.acquisition import DiverseTopK, ExpectedImprovement, Greedy, TopK
+from evogfn.algorithms.base import Sampler
+from evogfn.algorithms.baselines.mutagenesis import RandomMutagenesis
+from evogfn.core.types import Alphabet
+from evogfn.env.mutation import MutationEnvironment
+from evogfn.landscapes.base import FitnessLandscape
+from evogfn.landscapes.ehrlich import EhrlichLandscape
+from evogfn.loop import Campaign
+from evogfn.surrogate import DeepEnsemble
 
 ALPHABET = Alphabet.from_string("ABCD")
 LENGTH = 6
@@ -196,8 +201,6 @@ class TestRounds:
         assert result.oracle_calls == 8
 
     def test_a_supplied_initial_design_is_measured_first(self):
-        # Distinct rows: deduplication applies to round 0 too, so a design of
-        # four identical sequences would correctly collapse to one measurement.
         design = np.stack([np.full(LENGTH, i, dtype=np.int32) for i in range(4)])
         result = Campaign(
             landscape=CountingLandscape(),
@@ -210,48 +213,194 @@ class TestRounds:
         ).run()
         assert np.array_equal(result.sequences[:4], design)
 
+    def test_a_short_initial_design_is_topped_up_rather_than_under_spent(self):
+        # Round 0 is charged like every other round. A two-row opening design on
+        # an eight-well plate used to leave six wells of the budget unspent with
+        # nothing in the ledger saying so.
+        landscape = CountingLandscape()
+        design = np.stack([np.full(LENGTH, i, dtype=np.int32) for i in range(2)])
+        result = Campaign(
+            landscape=landscape,
+            sampler=RandomSampler(),
+            rounds=2,
+            batch_size=8,
+            pool_size=64,
+            initial_design=design,
+        ).run()
+        assert landscape.calls == 16
+        assert np.array_equal(result.sequences[:2], design)
 
-class TestDeduplication:
-    def test_a_collapsed_sampler_stops_rather_than_re_measuring(self):
-        # A sampler proposing one sequence forever would otherwise spend the
-        # entire budget measuring it repeatedly, and report a full ledger.
+
+class RepetitiveSampler(Sampler):
+    """Proposes from a tiny fixed menu, so a plate is mostly repeats.
+
+    A stand-in for a converged genetic algorithm: it still produces something
+    new every round, but most of any one plate is the same handful of designs.
+    That is the case the plate rule is about -- a wholly collapsed sampler is a
+    terminal condition, and this one is the ordinary expensive one.
+    """
+
+    def __init__(self, menu=4, seed=0):
+        super().__init__()
+        self._menu = menu
+        self._rng = np.random.default_rng(seed)
+        self._offset = 0
+
+    def propose(self, n):
+        self._count(n)
+        # A fresh block of `menu` designs each round, drawn from with
+        # replacement, so a plate of eight holds four designs twice over.
+        base = np.arange(self._offset, self._offset + self._menu)
+        return np.stack([self._design(i) for i in self._rng.choice(base, size=n)])
+
+    def observe(self, sequences, values):  # noqa: ARG002 - it advances on the round, not the data
+        self._offset += self._menu
+
+    @staticmethod
+    def _design(index):
+        """The ``index``-th sequence, as its digits in base ``|alphabet|``."""
+        digits = [(index // ALPHABET.size**place) % ALPHABET.size for place in range(LENGTH)]
+        return np.asarray(digits, dtype=np.int32)
+
+
+class TestThePlateIsAlwaysFull:
+    """The invariant every budget-indexed claim rests on.
+
+    Measured before this was enforced: at a pool the size of the plate, a random
+    arm assayed 6 wells of 8 and then 4, a genetic arm 4 and then 3. Half the
+    oracle budget went unspent, every round reported success, and the number the
+    paper indexes its results by was wrong by a factor of two.
+    """
+
+    @pytest.mark.parametrize("pool_size", [8, 9, 64], ids=["plate", "just-over", "library"])
+    def test_every_round_spends_the_whole_plate(self, pool_size):
         landscape = CountingLandscape()
         result = Campaign(
             landscape=landscape,
-            sampler=CollapsedSampler(),
-            surrogate=surrogate(),
-            rounds=4,
-            batch_size=8,
-            pool_size=64,
-        ).run()
-        assert landscape.calls < 32
-        assert len({row.tobytes() for row in result.sequences}) == len(result.sequences)
-
-    def test_nothing_is_measured_twice(self):
-        result = Campaign(
-            landscape=CountingLandscape(),
             sampler=RandomSampler(),
             surrogate=surrogate(),
             rounds=4,
             batch_size=8,
-            pool_size=64,
+            pool_size=pool_size,
         ).run()
-        unique = {row.tobytes() for row in np.ascontiguousarray(result.sequences)}
-        assert len(unique) == len(result.sequences)
+        assert landscape.calls == 32
+        assert [record.evaluated for record in result.rounds] == [8, 8, 8, 8]
 
-    def test_round_zero_deduplicates_too(self):
-        # A collapsed sampler's opening plate is one experiment, not eight.
+    def test_a_duplicate_heavy_sampler_still_spends_the_whole_budget(self):
+        # The failure this exists for. A sampler whose plate is mostly repeats
+        # used to have the repeats silently dropped and the round shortened; now
+        # the repeats are charged and the plate is filled either way.
         landscape = CountingLandscape()
-        Campaign(
+        result = Campaign(
+            landscape=landscape,
+            sampler=RepetitiveSampler(),
+            rounds=4,
+            batch_size=8,
+            pool_size=8,
+        ).run()
+        assert landscape.calls == 32
+        assert result.oracle_calls == 32
+        assert any(record.duplicates > 0 for record in result.rounds)
+
+    def test_topping_up_does_not_launder_a_repeat(self):
+        # Topping up serves the campaign's memory of earlier rounds and nothing
+        # else. If it also collapsed within-plate repeats, a converged method
+        # would get free measurements and convergence would look costless.
+        result = Campaign(
+            landscape=CountingLandscape(),
+            sampler=RepetitiveSampler(menu=2),
+            rounds=2,
+            batch_size=8,
+            pool_size=8,
+        ).run()
+        first = result.sequences[:8]
+        assert len({row.tobytes() for row in np.ascontiguousarray(first)}) < 8
+
+
+class TestThePlateRule:
+    def test_a_repeat_within_a_plate_is_charged(self):
+        # A collapsed sampler's opening plate consumes eight wells and buys one
+        # measurement's worth of information. Both halves of that are the
+        # method's, and the ledger says so rather than hiding the first half.
+        landscape = CountingLandscape()
+        result = Campaign(
             landscape=landscape,
             sampler=CollapsedSampler(),
             rounds=1,
             batch_size=8,
             pool_size=64,
         ).run()
-        assert landscape.calls == 1
+        assert landscape.calls == 8
+        assert result.rounds[0].duplicates == 7
+        assert result.rounds[0].duplicate_fraction == pytest.approx(7 / 8)
 
-    def test_deduplication_can_be_turned_off(self):
+    def test_nothing_is_measured_in_two_different_rounds(self):
+        # Across rounds the campaign remembers, which is what makes a round
+        # informed by the last one rather than a re-run of it.
+        result = Campaign(
+            landscape=CountingLandscape(),
+            sampler=RepetitiveSampler(),
+            rounds=4,
+            batch_size=8,
+            pool_size=8,
+        ).run()
+        start = 0
+        earlier: set[bytes] = set()
+        for record in result.rounds:
+            plate = np.ascontiguousarray(result.sequences[start : start + record.evaluated])
+            start += record.evaluated
+            keys = {row.tobytes() for row in plate}
+            assert not (keys & earlier), "a design was re-ordered in a later round"
+            earlier |= keys
+
+    def test_a_distinct_plate_holds_no_repeat_and_still_fills(self):
+        # The `genetic+distinct` arm. Same sampler, same budget, different plate
+        # rule -- and it has to fill the plate, or it would be measuring the
+        # other rule's cost as a shorter campaign instead of as a duplicate share.
+        landscape = CountingLandscape()
+        result = Campaign(
+            landscape=landscape,
+            sampler=RepetitiveSampler(menu=12),
+            rounds=4,
+            batch_size=8,
+            pool_size=8,
+            distinct_batch=True,
+        ).run()
+        assert landscape.calls == 32
+        assert all(record.duplicates == 0 for record in result.rounds)
+        assert result.duplicate_fraction == 0.0
+
+    def test_the_distinct_plate_diverges_from_the_bare_one(self):
+        # Why this is an arm rather than a re-reading of the bare ledger:
+        # dropping a repeat changes which design takes that well, so the two
+        # campaigns measure different things from round one onward.
+        def run(distinct):
+            return Campaign(
+                landscape=CountingLandscape(),
+                sampler=RepetitiveSampler(menu=12, seed=3),
+                rounds=3,
+                batch_size=8,
+                pool_size=8,
+                distinct_batch=distinct,
+            ).run()
+
+        assert not np.array_equal(run(distinct=False).sequences, run(distinct=True).sequences)
+
+    def test_a_sampler_that_can_produce_nothing_new_fails_loudly(self):
+        # The alternative was stopping quietly, which reported a full-looking
+        # ledger against a budget that was never spent. There is no honest way
+        # to fill this plate, so the campaign says so instead of pretending.
+        with pytest.raises(RuntimeError, match="cannot produce designs"):
+            Campaign(
+                landscape=CountingLandscape(),
+                sampler=CollapsedSampler(),
+                surrogate=surrogate(),
+                rounds=4,
+                batch_size=8,
+                pool_size=64,
+            ).run()
+
+    def test_the_memory_of_earlier_rounds_can_be_turned_off(self):
         landscape = CountingLandscape()
         Campaign(
             landscape=landscape,
@@ -401,3 +550,347 @@ class TestResult:
             pool_size=256,
         ).run()
         assert result.rounds[-1].rejection_ratio > 10
+
+
+class BallSampler(Sampler):
+    """Proposes everything its environment can build, in enumeration order.
+
+    Deterministic on purpose. Re-anchoring is a statement about *which designs
+    are reachable*, and a stochastic sampler would blur that into a question
+    about how lucky the draw was.
+    """
+
+    def __init__(self, env):
+        super().__init__()
+        self._env = env
+
+    def propose(self, n):
+        states = self._env.reachable_terminal_states()
+        self._count(states.shape[0])
+        return states[:n]
+
+    def reanchored(self, env):
+        return BallSampler(env)
+
+
+def mutation_env(max_mutations=2, parent=None, transitions=None):
+    return MutationEnvironment(
+        np.zeros(LENGTH, dtype=np.int32) if parent is None else parent,
+        ALPHABET,
+        max_mutations=max_mutations,
+        transitions=transitions,
+    )
+
+
+def small_ehrlich():
+    """A toy Ehrlich whose optimum is several mutations out, with a budget of one.
+
+    Chosen so the planted optimum is further than one round's mutation budget and
+    well within the campaign's total, which is the regime the benchmark's real
+    tasks are in -- 61 to 248 mutations away against a per-round budget of four.
+
+    Sixteen positions rather than eight, which is not cosmetic: the one-mutation
+    ball has 20 reachable designs against 13, and a campaign now fills every
+    plate it opens, so a ball smaller than the budget is a campaign that cannot
+    legally spend it. That is the right refusal and the wrong test instance.
+
+    Returns:
+        The landscape and a feasible wild type.
+    """
+    landscape = EhrlichLandscape(
+        sequence_length=16,
+        vocab_size=4,
+        n_motifs=2,
+        motif_length=2,
+        quantization=2,
+        max_spacing=2,
+        transition_density=0.7,
+        seed=1,
+    )
+    return landscape, landscape.feasible_sequence(seed=0)
+
+
+def ball_of(landscape, wild_type, max_mutations):
+    """The designs one anchor can reach, and the best value among them."""
+    env = MutationEnvironment(
+        wild_type,
+        landscape.alphabet,
+        max_mutations=max_mutations,
+        transitions=landscape.transition_matrix,
+    )
+    return env, float(landscape.evaluate(env.reachable_terminal_states()).max())
+
+
+class TestReanchoringIsOffByDefault:
+    """Nothing already measured moves because this mechanism was added."""
+
+    def test_a_campaign_without_an_environment_is_unchanged(self):
+        # Bit-identical against a fixed seed. The numbers are hard-coded rather
+        # than compared to a second run, so that a change to the loop cannot
+        # move both sides together and still pass.
+        result = Campaign(
+            landscape=CountingLandscape(),
+            sampler=RandomSampler(seed=7),
+            rounds=3,
+            batch_size=8,
+            pool_size=64,
+        ).run()
+        assert result.oracle_calls == 24
+        assert result.best_value == 4.0
+        assert result.trace() == [4.0, 4.0, 4.0]
+        assert result.sequences[0].tolist() == [3, 2, 2, 3, 2, 3]
+        assert int(result.sequences.sum()) == 232
+
+    def test_supplying_an_environment_alone_changes_no_measurement(self):
+        def run(**extra):
+            return Campaign(
+                landscape=CountingLandscape(),
+                sampler=RandomSampler(seed=7),
+                rounds=3,
+                batch_size=8,
+                pool_size=64,
+                **extra,
+            ).run()
+
+        plain = run()
+        watched = run(environment=mutation_env())
+        assert np.array_equal(plain.sequences, watched.sequences)
+        assert np.array_equal(plain.values, watched.values)
+        assert plain.trace() == watched.trace()
+
+    def test_a_fixed_anchor_never_leaves_the_wild_type(self):
+        # The failure this mechanism exists to fix, stated as a measurement: with
+        # the anchor held still, every round searches the same Hamming ball.
+        result = Campaign(
+            landscape=CountingLandscape(),
+            sampler=BallSampler(mutation_env(max_mutations=2)),
+            rounds=4,
+            batch_size=16,
+            pool_size=256,
+            environment=mutation_env(max_mutations=2),
+        ).run()
+        assert result.anchor_trace() == [0, 0, 0, 0]
+        assert result.best_value <= 2.0
+
+
+class TestReanchoringMovesTheSearch:
+    def test_cumulative_distance_outgrows_the_per_round_budget(self):
+        # The property the whole mechanism exists for. Two mutations per round
+        # is the budget; after four rounds the search is standing further out
+        # than that, which one fixed environment can never do.
+        env = mutation_env(max_mutations=2)
+        campaign = Campaign(
+            landscape=CountingLandscape(),
+            sampler=BallSampler(env),
+            rounds=4,
+            batch_size=16,
+            pool_size=256,
+            environment=env,
+            reanchor=True,
+        )
+        result = campaign.run()
+        assert result.anchor_trace() == [0, 1, 2, 3]
+        assert max(result.anchor_trace()) > env.max_mutations
+        moved = campaign.environment
+        assert moved is not None
+        assert moved.parent.tolist() == [1, 1, 1, 1, 0, 0]
+
+    def test_it_reaches_fitness_a_fixed_anchor_cannot(self):
+        def run(reanchor):
+            env = mutation_env(max_mutations=2)
+            return Campaign(
+                landscape=CountingLandscape(),
+                sampler=BallSampler(env),
+                rounds=4,
+                batch_size=16,
+                pool_size=256,
+                environment=env,
+                reanchor=reanchor,
+            ).run()
+
+        assert run(reanchor=True).best_value > run(reanchor=False).best_value
+
+    def test_the_ledger_names_the_design_each_round_started_from(self):
+        env = mutation_env(max_mutations=2)
+        result = Campaign(
+            landscape=CountingLandscape(),
+            sampler=BallSampler(env),
+            rounds=3,
+            batch_size=16,
+            pool_size=256,
+            environment=env,
+            reanchor=True,
+        ).run()
+        anchors = [record.anchor for record in result.rounds]
+        assert anchors[0] == (0, 0, 0, 0, 0, 0)
+        # Each anchor is a design that was actually measured, not a construction.
+        measured = {tuple(int(t) for t in row) for row in result.sequences}
+        assert all(anchor in measured for anchor in anchors[1:])
+
+    def test_the_anchor_only_moves_on_an_improvement(self):
+        # A round that learns nothing must not walk the search off a peak it
+        # has already found.
+        env = mutation_env(max_mutations=2)
+        result = Campaign(
+            landscape=CountingLandscape(infeasible_token=None),
+            sampler=BallSampler(env),
+            rounds=6,
+            batch_size=16,
+            pool_size=256,
+            environment=env,
+            reanchor=True,
+        ).run()
+        distances = result.anchor_trace()
+        assert distances == sorted(distances)
+        assert all(
+            second - first <= env.max_mutations for first, second in itertools.pairwise(distances)
+        )
+
+
+class TestProposalsStayInsideTheMovedEnvironment:
+    def test_every_measured_design_is_reachable_from_that_round_s_anchor(self):
+        landscape, wild_type = small_ehrlich()
+        env = MutationEnvironment(
+            wild_type,
+            landscape.alphabet,
+            max_mutations=1,
+            transitions=landscape.transition_matrix,
+        )
+        result = Campaign(
+            landscape=landscape,
+            sampler=RandomMutagenesis(env, feasible_only=True, seed=0),
+            rounds=4,
+            batch_size=12,
+            pool_size=64,
+            environment=env,
+            reanchor=True,
+        ).run()
+
+        start = 0
+        for record in result.rounds:
+            batch = result.sequences[start : start + record.evaluated]
+            start += record.evaluated
+            anchored = MutationEnvironment(
+                np.array(record.anchor, dtype=np.int32),
+                landscape.alphabet,
+                max_mutations=1,
+                transitions=landscape.transition_matrix,
+            )
+            assert anchored.is_reachable(batch).all()
+            assert landscape.is_feasible(batch).all()
+        # Without this the assertions above would hold vacuously on a campaign
+        # that never moved: every round would be checked against the wild type,
+        # which is the environment the sampler was built on anyway. The sampler
+        # follows the anchor through its own `reanchored` hook rather than
+        # through a factory, which is the path a real campaign takes now that
+        # every baseline implements one.
+        assert max(result.anchor_trace()) > 0
+
+
+class TestReanchoringOnEhrlich:
+    """The test that says the mechanism matters rather than merely runs."""
+
+    def test_the_optimum_is_out_of_reach_of_one_round_and_inside_the_campaign(self):
+        # The guard on the instance itself. Without this the comparison below
+        # could pass on a landscape where re-anchoring was never needed.
+        landscape, wild_type = small_ehrlich()
+        _, within_one = ball_of(landscape, wild_type, 1)
+        _, within_four = ball_of(landscape, wild_type, 4)
+        assert within_one < within_four == 1.0
+
+    def test_re_anchoring_reaches_fitness_the_fixed_ball_does_not_contain(self):
+        # Not "better on this run" but *outside what the fixed anchor could ever
+        # measure*: the ceiling is the best value in the one-mutation ball, and
+        # the fixed campaign is capped at it however many rounds it runs. A
+        # comparison of the two best values alone would also pass on a run that
+        # merely got luckier inside the same ball.
+        landscape, wild_type = small_ehrlich()
+        _, ceiling = ball_of(landscape, wild_type, 1)
+
+        def run(reanchor):
+            # Twenty wells against a ball of twenty designs. The fixed arm spends
+            # its budget exactly once over, which is the most a fixed anchor can
+            # legally do: every plate is filled, and nothing is re-ordered.
+            env, _ = ball_of(landscape, wild_type, 1)
+            return Campaign(
+                landscape=landscape,
+                sampler=BallSampler(env),
+                rounds=4,
+                batch_size=5,
+                pool_size=64,
+                environment=env,
+                reanchor=reanchor,
+            ).run()
+
+        fixed = run(reanchor=False)
+        moving = run(reanchor=True)
+        assert fixed.best_value <= ceiling
+        assert moving.best_value > ceiling
+        assert max(moving.anchor_trace()) > 1
+        assert moving.oracle_calls == fixed.oracle_calls == 20
+
+
+class TestReanchoringIsRefusedWhenItCannotBeDone:
+    def test_an_infeasible_anchor_is_refused(self):
+        # The landscape scores this design finite; the environment cannot build
+        # it. Anchoring there would void feasibility-by-construction for every
+        # later round, silently.
+        transitions = np.ones((ALPHABET.size, ALPHABET.size))
+        transitions[1, 1] = 0.0
+        env = mutation_env(max_mutations=2, transitions=transitions)
+        campaign = Campaign(
+            landscape=CountingLandscape(),
+            sampler=BallSampler(env),
+            rounds=2,
+            batch_size=4,
+            pool_size=64,
+            initial_design=np.array([[1, 1, 0, 0, 0, 0]], dtype=np.int32),
+            environment=env,
+            reanchor=True,
+        )
+        with pytest.raises(ValueError, match="infeasible design"):
+            campaign.run()
+
+    def test_re_anchoring_without_an_environment_is_refused(self):
+        with pytest.raises(ValueError, match="needs the environment"):
+            Campaign(
+                landscape=CountingLandscape(),
+                sampler=BallSampler(mutation_env()),
+                reanchor=True,
+            )
+
+    def test_a_sampler_that_can_neither_be_told_nor_rebuilt_is_refused(self):
+        # Refused at construction rather than after a round of oracle calls.
+        with pytest.raises(ValueError, match="cannot follow a moved anchor"):
+            Campaign(
+                landscape=CountingLandscape(),
+                sampler=RandomSampler(),
+                environment=mutation_env(),
+                reanchor=True,
+            )
+
+    def test_a_factory_is_enough_for_a_sampler_that_cannot_be_told(self):
+        # RandomSampler deliberately has no `reanchored`, which is what makes
+        # this the factory path. Every baseline in the package implements the
+        # hook, so using one of those here would silently test the other branch.
+        env = mutation_env(max_mutations=2)
+        rebuilt = []
+
+        def factory(moved):
+            rebuilt.append(moved)
+            return RandomSampler(seed=len(rebuilt))
+
+        campaign = Campaign(
+            landscape=CountingLandscape(),
+            sampler=RandomSampler(seed=0),
+            rounds=3,
+            batch_size=8,
+            pool_size=64,
+            environment=env,
+            reanchor=True,
+            sampler_factory=factory,
+        )
+        result = campaign.run()
+        assert max(result.anchor_trace()) > 0
+        assert rebuilt, "the factory was never called, so nothing was rebuilt"
+        assert campaign.sampler is not None

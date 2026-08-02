@@ -1,0 +1,7 @@
+_target_: evogfn.rewards.base.TemperedReward
+# Jain et al. use 3 throughout. Higher concentrates the target on the best
+# designs; 0 makes it uniform.
+beta: 3.0
+# Dead designs would otherwise have log R = -inf, which becomes nan in the loss.
+# ~20% of measured GB1 variants are exactly zero, so this is the common case.
+floor: 1.0e-8

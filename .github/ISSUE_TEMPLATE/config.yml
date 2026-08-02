@@ -2,8 +2,8 @@ blank_issues_enabled: true
 
 contact_links:
   - name: Question or discussion
-    url: https://github.com/SimonCrouzet/EvoFlowNet/discussions
+    url: https://github.com/SimonCrouzet/EvoGFN/discussions
     about: For usage questions, method discussion, or "is this the right approach" -- not a bug.
   - name: Report something privately
-    url: https://github.com/SimonCrouzet/EvoFlowNet/security/advisories/new
+    url: https://github.com/SimonCrouzet/EvoGFN/security/advisories/new
     about: For anything that should not be discussed in a public issue.

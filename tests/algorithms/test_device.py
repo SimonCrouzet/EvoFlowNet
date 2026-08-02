@@ -11,11 +11,11 @@ import numpy as np
 import pytest
 import torch
 
-from evoflownet.algorithms.gflownet import replay_trajectories, sample_trajectories
-from evoflownet.algorithms.gflownet.sampling import _multinomial
-from evoflownet.core import Alphabet
-from evoflownet.env.mutation import MutationEnvironment
-from evoflownet.models import SequencePolicy
+from evogfn.algorithms.gflownet import replay_trajectories, sample_trajectories
+from evogfn.algorithms.gflownet.sampling import _multinomial
+from evogfn.core import Alphabet
+from evogfn.env.mutation import MutationEnvironment
+from evogfn.models import SequencePolicy
 
 needs_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="no CUDA device")
 

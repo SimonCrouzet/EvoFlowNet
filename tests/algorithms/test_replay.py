@@ -11,15 +11,16 @@ import numpy as np
 import pytest
 import torch
 
-from evoflownet.algorithms.gflownet import (
+from evogfn.algorithms.gflownet import (
+    replay,
     replay_trajectories,
     sample_trajectories,
     trajectory_balance_loss,
 )
-from evoflownet.core import Alphabet
-from evoflownet.env.base import State
-from evoflownet.env.mutation import MutationEnvironment
-from evoflownet.models import SequencePolicy
+from evogfn.core import Alphabet
+from evogfn.env.base import State
+from evogfn.env.mutation import MutationEnvironment
+from evogfn.models import SequencePolicy
 
 
 def make_env(length=5, symbols="ABC", max_mutations=3, transitions=None):
@@ -149,6 +150,77 @@ class TestUnderFeasibilityMasking:
             env, policy, sampled.terminal, generator=torch.Generator().manual_seed(5)
         )
         assert np.array_equal(replayed.terminal, sampled.terminal)
+
+
+class TestFeasibleButUnconstructible:
+    """The gap between what an environment permits and what it can build.
+
+    A design can satisfy the transition constraint and sit inside the mutation
+    budget -- so `is_reachable` admits it -- and still have no ordering of its
+    mutations along which every intermediate is feasible. Replay used to hand
+    such a row a truncated backward path and score it forward from the source,
+    where it ends at a different sequence entirely. It is dropped now, and the
+    drop has to be *reported*: a caller pairing rewards with the trajectories
+    that come back would otherwise train each one toward another design's
+    reward, which raises nothing and is invisible in a loss curve.
+    """
+
+    def trap(self):
+        """An environment holding a feasible design with no route into it.
+
+        The parent is ``AAA`` and the target is ``BCA``, which is feasible --
+        ``BC`` and ``CA`` are both permitted. Neither route to it is. Mutating
+        position 0 first passes through ``BAA`` and ``BA`` is forbidden;
+        mutating position 1 first passes through ``ACA`` and ``AC`` is
+        forbidden. Two mutations means exactly two orderings, so that is all of
+        them.
+        """
+        transitions = np.ones((3, 3), dtype=np.float64)
+        transitions[1, 0] = 0.0  # B may not be followed by A
+        transitions[0, 2] = 0.0  # A may not be followed by C
+        env = make_env(length=3, symbols="ABC", max_mutations=2, transitions=transitions)
+        return env, np.array([[1, 2, 0]], dtype=np.int32)
+
+    def test_the_environment_calls_the_trapped_design_reachable(self):
+        # Guards the fixture rather than the code: if `is_reachable` ever
+        # rejected this design, replay would refuse it up front and every test
+        # below would pass for the wrong reason.
+        env, target = self.trap()
+        assert env.is_reachable(target).tolist() == [True]
+
+    def test_no_trajectory_of_the_graph_ends_at_it(self):
+        # The other half of the fixture, and the definition of the gap: a
+        # forward walk of the environment's own masks never arrives.
+        env, target = self.trap()
+        built = env.reachable_terminal_states()
+        assert not any(np.array_equal(row, target[0]) for row in built)
+
+    def test_replay_reports_it_unconstructed_instead_of_scoring_it(self):
+        env, target = self.trap()
+        policy = make_policy(env)
+        replayed = replay(env, policy, target, generator=torch.Generator().manual_seed(0))
+        assert replayed.constructed.tolist() == [False]
+        assert len(replayed.trajectories) == 0
+
+    def test_a_constructible_row_beside_it_is_still_scored(self):
+        # Per row, not per batch. Dropping the batch would throw away real
+        # training signal; keeping it would misalign every reward in it.
+        env, target = self.trap()
+        policy = make_policy(env)
+        batch = np.concatenate([target, env.parent[None, :]])
+        replayed = replay(env, policy, batch, generator=torch.Generator().manual_seed(0))
+        assert replayed.constructed.tolist() == [False, True]
+        assert np.array_equal(replayed.trajectories.terminal, env.parent[None, :])
+
+    def test_what_comes_back_is_never_a_sequence_that_was_not_asked_for(self):
+        # The bug itself. A truncated path scored forward from the source lands
+        # somewhere other than the terminal it was drawn from, so the terminals
+        # returned must be exactly the rows the mask kept.
+        env, target = self.trap()
+        policy = make_policy(env)
+        batch = np.concatenate([target, env.parent[None, :], target])
+        replayed = replay(env, policy, batch, generator=torch.Generator().manual_seed(1))
+        assert np.array_equal(replayed.trajectories.terminal, batch[replayed.constructed])
 
 
 class TestUsableForTraining:

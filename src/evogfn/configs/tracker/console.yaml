@@ -1,0 +1,2 @@
+_target_: evogfn.tracking.console.ConsoleTracker
+every: 50

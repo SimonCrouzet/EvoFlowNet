@@ -9,9 +9,9 @@ import numpy as np
 import pytest
 import torch
 
-from evoflownet.core import Alphabet
-from evoflownet.env.mutation import MutationEnvironment
-from evoflownet.models import SequencePolicy, to_tensor
+from evogfn.core import Alphabet
+from evogfn.env.mutation import MutationEnvironment
+from evogfn.models import SequencePolicy, to_tensor
 
 
 @pytest.fixture

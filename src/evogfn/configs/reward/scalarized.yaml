@@ -1,0 +1,39 @@
+# Multi-objective reward. Collapses the (n, n_objectives) matrix a landscape
+# returns into one number per design, then applies the same tempering a
+# single-objective run uses -- so the sampler, the loss and the training loop
+# need no knowledge that there was ever more than one objective.
+#
+#   evogfn train landscape=ch65 reward=scalarized
+#
+# The preference must match the landscape's objective count and sum to 1.
+# Three equal weights is the neutral starting point, not a recommendation:
+# scanning it is the point, e.g.
+#   evogfn train landscape=ch65 reward=scalarized 'reward.preference=[0.8,0.1,0.1]'
+_target_: evogfn.rewards.scalarization.ScalarizedReward
+
+# WeightedSum is the default because it is the only scalarisation with no free
+# parameter beyond the preference, and because CH65's three objectives share a
+# scale (-log10 KD, roughly 6 to 10.5) so a plain weighted mean is meaningful.
+# Its structural limit is real: sweeping the preference recovers only the convex
+# hull of the Pareto front.
+#
+# Tchebycheff reaches concave parts of the front, but needs a reference below
+# the achievable set and, with CH65's censoring floor at 6.0, min_i w_i(f_i - z_i)
+# ties the ~47% of variants censored on SI06 at the same value and destroys the
+# ordering across half the space. If you switch to it, say why.
+#
+# WeightedLogSum (geometric mean) refuses to let one strong objective compensate
+# a dead one -- worth having where an objective can genuinely be zero, which on
+# this landscape it cannot be.
+scalarization:
+  _target_: evogfn.rewards.scalarization.WeightedSum
+
+preference: [0.3333333333333333, 0.3333333333333333, 0.3333333333333333]
+
+# Applied after scalarisation. Same exponent and floor as reward=tempered, so
+# switching a run from single- to multi-objective changes the combination step
+# and nothing else.
+reward:
+  _target_: evogfn.rewards.base.TemperedReward
+  beta: 3.0
+  floor: 1.0e-8

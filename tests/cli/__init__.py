@@ -1,1 +1,1 @@
-"""Tests for the command line interface."""
+"""Tests for the command line entry point."""

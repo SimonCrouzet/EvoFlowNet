@@ -3,8 +3,8 @@
 import numpy as np
 import pytest
 
-from evoflownet.metrics import target_distribution
-from evoflownet.rewards import TemperedReward
+from evogfn.metrics import target_distribution
+from evogfn.rewards import TemperedReward
 
 
 class TestLogReward:
