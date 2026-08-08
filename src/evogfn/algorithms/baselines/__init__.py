@@ -1,9 +1,38 @@
 """Classical baselines, driven through the same interface as the GFlowNet."""
 
+from evogfn.algorithms.baselines.adalead import (
+    DEFAULT_RECOMBINE_PROB,
+    DEFAULT_THRESHOLD,
+    AdaLead,
+)
 from evogfn.algorithms.baselines.annealing import SimulatedAnnealing
 from evogfn.algorithms.baselines.cmaes import CMAES
+from evogfn.algorithms.baselines.directed_evolution import (
+    RECOMBINATION_OVERHEAD,
+    Recombination,
+    ReplicatedProtocol,
+    SaturationProtocol,
+    SingleStepWalk,
+    distinct_site_orders,
+    recombination_replicates,
+    replicated_recombination,
+    replicated_walk,
+    site_order,
+    substitutions_at,
+    walk_replicates,
+    within_budget,
+)
 from evogfn.algorithms.baselines.genetic import GeneticAlgorithm
 from evogfn.algorithms.baselines.mlde import (
+    # Every training size the module defines, and the two constants the last of
+    # them is derived from. `ADAPTED_TRAINING_SIZE` is the one that must not be
+    # missing: it is **ours** rather than Wittmann et al.'s, so the reader who
+    # reaches this package having found `PUBLISHED_TRAINING_SIZE` in it is the
+    # reader most likely to quote the adapted arm as MLDE -- and exporting only
+    # the published names is what makes them look like the only ones there are.
+    ADAPTED_TRAINING_SIZE,
+    CAMPAIGN_PLATES,
+    CONSTRAINED_FEASIBLE_FRACTION,
     DEFAULT_TRAINING_SIZE,
     MLDE,
     PUBLISHED_BATCH_SIZE,
@@ -23,7 +52,12 @@ from evogfn.algorithms.baselines.nsga2 import (
 )
 
 __all__ = [
+    "ADAPTED_TRAINING_SIZE",
+    "CAMPAIGN_PLATES",
     "CMAES",
+    "CONSTRAINED_FEASIBLE_FRACTION",
+    "DEFAULT_RECOMBINE_PROB",
+    "DEFAULT_THRESHOLD",
     "DEFAULT_TRAINING_SIZE",
     "MLDE",
     "NSGA2",
@@ -34,11 +68,25 @@ __all__ = [
     "PUBLISHED_MODELS_AVERAGED",
     "PUBLISHED_POPULATION_SIZE",
     "PUBLISHED_TRAINING_SIZE",
+    "RECOMBINATION_OVERHEAD",
     "TOURNAMENT_SIZE",
+    "AdaLead",
     "GeneticAlgorithm",
     "HillClimbing",
     "RandomMutagenesis",
+    "Recombination",
+    "ReplicatedProtocol",
+    "SaturationProtocol",
     "SimulatedAnnealing",
+    "SingleStepWalk",
     "crowding_distance",
+    "distinct_site_orders",
     "fast_non_dominated_sort",
+    "recombination_replicates",
+    "replicated_recombination",
+    "replicated_walk",
+    "site_order",
+    "substitutions_at",
+    "walk_replicates",
+    "within_budget",
 ]

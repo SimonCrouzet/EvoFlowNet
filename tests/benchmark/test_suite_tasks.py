@@ -21,35 +21,63 @@ landscape's own optimum claims a design scoring above the maximum, and a
 declared bound below what an arm reaches makes every regret on the task
 negative. Both are refused rather than reported.
 
+**A campaign that failed, stored as nothing at all.** `run_task` caught the
+exhaustion, printed a line and moved on, so an arm that could not run anywhere on
+a task left *no record* -- and an empty cell in a table is an absence any reader
+may fill in, including as that table's sharpest result. `TestAnExhaustedCampaign`
+pins the record it now writes: that it exists, that it carries no measurement
+dressed up as a zero, that it says how far the campaign got, and that the readers
+which average do not quietly average it in.
+
 The heavier re-derivations are marked ``slow``. ``large-space`` is not among
 them at all: its beam search at L=256 runs for minutes, and the place to
 re-check it is ``experiments/audit_optima.py``, which exists for exactly that.
 """
 
 import itertools
+from dataclasses import replace
 
 import numpy as np
 import pytest
 
+from evogfn.algorithms.base import Sampler
+from evogfn.algorithms.baselines.mlde import MLDE
 from evogfn.benchmark.attainable import attainable_optimum, reanchored_attainable
-from evogfn.benchmark.methods import BASELINES, OBJECTIVES, anchor_arms
+from evogfn.benchmark.methods import BASELINES, OBJECTIVES, anchor_arms, classical
 from evogfn.benchmark.protocol import Protocol
-from evogfn.benchmark.store import ResultStore
+from evogfn.benchmark.store import ResultStore, RunRecord
 from evogfn.benchmark.suite import (
     CAPPED,
     CONSTRAINT_DENSITIES,
     DIAGNOSTIC_DENSITY,
+    DIAGNOSTIC_MUTATIONS,
+    DIAGNOSTIC_PROTOCOL,
     MAIN,
+    REJECTION_RADII,
+    REPLICATION_SEEDS,
+    TRPB_MUTATIONS,
+    _matched_kernel_genetic,
+    _round_rows,
     anchor_study,
     budget_gradient,
     constraint_density,
+    fit_status,
     fixed_anchor_task,
     objective_task,
+    records_to_metric,
+    rejection_arms,
+    rejection_curve,
+    replicate_instance,
+    replication,
     rounds_curve,
     run_task,
 )
 from evogfn.benchmark.tasks import Attainable, Task
+from evogfn.core.types import Alphabet
+from evogfn.env.mutation import MutationEnvironment
 from evogfn.landscapes.ehrlich import EhrlichLandscape
+from evogfn.loop.campaign import Campaign
+from evogfn.loop.ledger import RoundRecord
 
 #: A landscape small enough to run a real campaign against inside a test, and
 #: chosen so that random mutagenesis improves on the parent more than once in
@@ -70,9 +98,22 @@ TOY = {
 }
 
 #: Tasks whose re-anchoring audit is affordable in a test. ``large-space`` is
-#: excluded by size rather than by choice; ``gb1-anchor`` has no planted optimum
-#: to march to and no anchor to move.
+#: excluded by size rather than by choice; the empirical anchors have no planted
+#: optimum to march to and no anchor to move, and are re-derived by
+#: `TestTheEmpiricalAnchors` instead, which is a different argument.
 AUDITABLE = ("feasibility", "protocol-alde", "protocol-evolvepro")
+
+#: The two four-site empirical tasks. Their bound is an *enumeration* of the
+#: whole library rather than a search bracket, and that is a property of each
+#: landscape which has to be checked per landscape -- a borrowed bound puts a
+#: floor no method can clear into every regret on the task, which is the exact
+#: failure the attainability mechanism exists to prevent.
+EMPIRICAL_ANCHORS = ("gb1-anchor", "trpb-anchor")
+
+
+def main_task(name):
+    """One of the headline tasks, by name."""
+    return next(task for task in MAIN if task.name == name)
 
 
 def toy_landscape() -> EhrlichLandscape:
@@ -237,6 +278,107 @@ def test_the_diagnostics_reach_their_optimum_at_the_shared_radius():
     assert measured.lower >= declared.lower - 1e-9
 
 
+class TestTheEmpiricalAnchors:
+    """GB1 and TrpB: two datasets, two audits, and never one bound for both.
+
+    Their declaration is unlike every other task's. Both are
+    `Attainable.whole_optimum`, which claims *nothing is out of reach* -- the
+    strongest thing this mechanism can say, and the only one whose regret floor
+    is genuinely zero. It is true here for a structural reason and not for an
+    empirical one: the assay varies four positions and the sequence is those four
+    positions, so a budget of four with one mutation per position enumerates the
+    whole library. Nothing about GB1 makes that true of TrpB, which is why the
+    property is checked per landscape below rather than argued once.
+
+    The failure this guards is the one the whole attainability mechanism exists
+    for, in its most tempting form: two tasks that look alike, one already
+    audited, and a declaration copied across. On any landscape with more sites
+    than budget that copy would put an unclearable floor into every regret on the
+    task, and the row would still print a number.
+    """
+
+    @pytest.mark.parametrize("name", EMPIRICAL_ANCHORS)
+    def test_the_radius_is_the_whole_sequence_so_the_anchor_has_nowhere_to_go(self, name):
+        # The premise of `whole_optimum` on these two, and the thing that would
+        # silently stop holding if a task were ever added on a library varying
+        # more positions than its budget allows mutations. Such a task must
+        # re-anchor and its bound is a bracket; declaring the whole optimum for
+        # it would claim the best variant is reachable when it is not.
+        task = main_task(name)
+        landscape = task.landscape()
+
+        assert task.max_mutations == landscape.sequence_length, (
+            f"{name} searches {task.max_mutations} of {landscape.sequence_length} sites, so its "
+            f"ball is not the whole library and its bound cannot be an enumeration"
+        )
+        assert not task.reanchor, (
+            f"{name} re-anchors, which only buys reach a fixed anchor lacks; here the first "
+            f"round already sees every design a later one could be anchored at"
+        )
+        assert task.search_budget == landscape.sequence_length
+
+    @pytest.mark.parametrize("name", EMPIRICAL_ANCHORS)
+    def test_the_declaration_defers_to_the_landscape_rather_than_naming_a_number(self, name):
+        # `whole_optimum` and not `exactly(2.4505, ...)`. A literal would be a
+        # second copy of the dataset's optimum living in the suite, and it would
+        # go on reading as an audit after a repin moved the assay under it.
+        task = main_task(name)
+
+        assert task.attainable is not None
+        assert task.attainable.lower is None
+        assert task.attainable.upper is None
+        audited = task.attainable_optimum(nominal(task))
+        assert audited is not None
+        assert audited.is_exact
+        assert audited.regret_floor == (0.0, 0.0)
+
+    def test_neither_anchor_borrows_the_others_audit(self):
+        # The bound is a claim about one library's reachable set, and the two
+        # libraries are different sizes, different assays and different optima.
+        # A shared provenance string would mean one audit was quoted for both.
+        gb1, trpb = (main_task(name).attainable for name in EMPIRICAL_ANCHORS)
+        assert gb1 is not None
+        assert trpb is not None
+
+        assert gb1.source != trpb.source
+        assert "160,000" in trpb.source
+        assert nominal(main_task("gb1-anchor")) != nominal(main_task("trpb-anchor"))
+
+    def test_the_trpb_radius_is_read_off_the_assay(self):
+        # Four, and derived from the positions the paper assayed rather than
+        # written down beside them -- so the equality the task rests on cannot
+        # be broken by editing one of two agreeing literals.
+        assert main_task("trpb-anchor").landscape().sequence_length == TRPB_MUTATIONS
+
+    @pytest.mark.slow
+    @pytest.mark.parametrize("name", EMPIRICAL_ANCHORS)
+    def test_the_whole_library_is_enumerated_and_contains_the_declared_optimum(self, name):
+        """The audit itself, re-derived per landscape rather than trusted.
+
+        This is what makes ``whole_optimum`` a measurement here. The audit
+        enumerates every terminal state reachable from the published wild type
+        under the task's own budget and reports the maximum over it; for these
+        two that enumeration is the entire assayed library, so the answer is
+        exact and equal to the landscape's own optimum. Marked slow because it
+        loads a real dataset and walks 160,000 states.
+        """
+        task = main_task(name)
+        measured = attainable_optimum(task)
+        declared = task.attainable_optimum(nominal(task))
+        assert declared is not None
+
+        assert measured.is_exact, (
+            f"{name} declares an enumerated bound but the audit could only bracket "
+            f"[{measured.lower}, {measured.upper}]"
+        )
+        assert measured.lower == pytest.approx(nominal(task)), (
+            f"{name} claims nothing is out of reach and the audit reached only {measured.lower} "
+            f"of a nominal {nominal(task)}; the declaration is optimistic"
+        )
+        assert measured.regret_floor == pytest.approx((0.0, 0.0))
+        assert declared.lower == pytest.approx(measured.lower)
+
+
 # --------------------------------------------------------------------------
 # The mechanism, end to end through a real methodology.
 # --------------------------------------------------------------------------
@@ -343,7 +485,61 @@ def test_a_real_campaign_stores_what_it_cost(tmp_path):
     # does not. Reversed would mean the two clocks had been swapped -- which no
     # single-clock check could catch, and which would make the comparable figure
     # the contended one.
-    assert record.cpu_seconds <= record.wall_seconds + 1e-6
+    #
+    # The tolerance is proportional rather than a fixed microsecond, and that is
+    # not slack for its own sake. This toy runs in under ten milliseconds, so a
+    # scheduler hiccup of a fraction of a millisecond -- which is what a loaded
+    # machine delivers, and this suite is routinely run beside a dozen campaigns
+    # -- exceeds an absolute epsilon while saying nothing about which clock is
+    # which. A swap, the failure actually under test, puts the two figures on
+    # opposite sides by the whole duration and is caught by any tolerance well
+    # below 1. What was here before failed on four separate runs today, none of
+    # them a swap.
+    assert record.cpu_seconds <= record.wall_seconds * 1.25 + 1e-3
+
+
+def test_an_arm_that_repairs_its_decode_stores_how_often_it_had_to(tmp_path):
+    """Guards the attribution field reading zero for an arm that repairs constantly.
+
+    The number decides whose result a CMA-ES score is. Its decoder is a
+    per-position argmax over a relaxation that cannot express a transition
+    constraint, so on a constrained task the raw decode is unbuildable and a
+    projection chooses the design instead; at a repaired share near one, every
+    design credited to the method was selected by that projection subject to the
+    method's preferences, which is a different sentence from the one a reader
+    would otherwise write.
+
+    A default of zero is what makes the failure silent: an unwired field and an
+    arm whose relaxation found the constructible set unaided are the same record.
+    So this runs a real campaign on a constrained task rather than stamping a
+    record, and the only way it passes is `run_task` reading the counter off the
+    sampler the campaign finished with.
+    """
+    store = ResultStore(tmp_path)
+    task = toy_task(reanchor=True, attainable=None)
+    run_task(task, {"cmaes": BASELINES["cmaes"]}, store, [0], report=lambda _: None)
+    record = store.load(task.name, "cmaes")[0]
+
+    # Strictly above zero, not merely in range: zero is the default an unwired
+    # field returns, so a bounds check would pass on exactly the bug this is
+    # here to catch. The toy carries a transition constraint, and a separable
+    # Gaussian over per-position logits cannot represent one -- so a raw decode
+    # that satisfied it would be luck, and never satisfying it is the expected
+    # behaviour rather than a defect.
+    assert record.repaired_fraction > 0.0
+    assert record.repaired_fraction <= 1.0
+
+
+def test_an_arm_that_decodes_nothing_stores_a_zero_repaired_share(tmp_path):
+    """The other half: zero must mean "decodes no relaxation", not "unmeasured".
+
+    Read by attribute, so a sampler that carries no such counter stores a plain
+    zero and the column stays comparable. Without this the field would be read
+    as a repair rate for every arm in the table.
+    """
+    record = stored(tmp_path, toy_task(reanchor=True, attainable=None))
+
+    assert record.repaired_fraction == 0.0
 
 
 def test_a_campaign_that_reports_no_duplicates_stores_a_zero_share(tmp_path):
@@ -365,6 +561,391 @@ def test_an_unaudited_task_stores_no_regret(tmp_path):
     record = stored(tmp_path, toy_task(reanchor=True, attainable=None))
     assert record.regret is None
     assert np.isfinite(record.best)
+
+
+#: A sparse Ehrlich instance, on which rejection sampling actually gives up.
+#: The point of running the shipped ``genetic-feasible`` arm against it rather
+#: than a stub is that the whole finding is about a real arm on a real
+#: constraint: a stub can be made to exhaust, but only a real one can show
+#: *why* it exhausted.
+SPARSE = {
+    "sequence_length": 16,
+    "vocab_size": 8,
+    "n_motifs": 1,
+    "motif_length": 4,
+    "quantization": 4,
+    "max_spacing": 2,
+    "transition_density": 0.05,
+    "seed": 2,
+}
+
+
+def sparse_task() -> Task:
+    """A task whose feasible set is too thin for rejection sampling."""
+    return Task(
+        name="sparse",
+        purpose="a constraint sparse enough that rejection sampling stalls",
+        build=lambda: EhrlichLandscape(**SPARSE),  # type: ignore[arg-type]
+        protocol=Protocol(rounds=4, batch_size=16, max_mutations=4),
+        max_mutations=4,
+        reanchor=False,
+        attainable=None,
+    )
+
+
+def test_a_rejection_arm_stores_the_draws_that_explain_its_cost(tmp_path):
+    """Guards three counters that are in the schema and empty in the data.
+
+    They default to zero, which makes an unwired column and an arm that rejected
+    nothing the same record. So this runs the shipped rejection arm rather than
+    stamping one: the only way it passes is `run_task` reading the counters off
+    the sampler the campaign finished with.
+
+    ``draws_unmutated`` is the one that matters. Without it the rejection rate is
+    the whole story and it reads as a cost the method is absorbing; with it, the
+    draws that survived turn out to be overwhelmingly the anchor unchanged --
+    admitted because an unmutated design is trivially reachable, and worth
+    nothing because it is the design the arm started from.
+    """
+    store = ResultStore(tmp_path)
+    task = toy_task(reanchor=True, attainable=None)
+    run_task(
+        task, {"genetic-feasible": BASELINES["genetic-feasible"]}, store, [0], report=lambda _: None
+    )
+    record = store.load(task.name, "genetic-feasible")[0]
+
+    assert record.draws_attempted > 0
+    assert 0 < record.draws_rejected < record.draws_attempted
+    assert record.draws_unmutated > 0
+    assert record.draws_unmutated <= record.draws_attempted - record.draws_rejected
+
+
+def test_an_arm_that_rejects_nothing_stores_zero_draws(tmp_path):
+    # Zero has to mean "runs no rejection loop", not "rejected nothing": read by
+    # attribute, so an arm carrying no such counter stores a plain zero and the
+    # column stays comparable down its length.
+    record = stored(tmp_path, toy_task(reanchor=True, attainable=None))
+
+    assert (record.draws_attempted, record.draws_rejected, record.draws_unmutated) == (0, 0, 0)
+
+
+def test_the_arm_that_gives_up_keeps_the_numbers_that_explain_why(tmp_path):
+    """The two halves of this fix, together, on the case that motivated both.
+
+    A real rejection arm on a real sparse constraint, stored rather than
+    discarded, and carrying the counters that say what went wrong. Every
+    assertion here is about something that used to be absent: the record itself,
+    and -- once there is a record -- the reason the rejection rate on it is not
+    the alarming number.
+
+    The counters have to be incremented *before* the sampler raises. The one run
+    that gives up is the run whose numbers explain the failure, and accounting
+    written after the raise is accounting that never happens on it.
+    """
+    store = ResultStore(tmp_path)
+    task = sparse_task()
+    run_task(
+        task, {"genetic-feasible": BASELINES["genetic-feasible"]}, store, [0], report=lambda _: None
+    )
+    record = store.load(task.name, "genetic-feasible")[0]
+
+    assert record.exhausted
+    assert record.draws_attempted > 0
+    assert record.draws_rejected > 0
+    # The finding, as an assertion: most of what survived the filter was the
+    # anchor itself. Were this small, the rejection rate beside it would be the
+    # whole story and the story would be that rejection is coping.
+    admitted = record.draws_attempted - record.draws_rejected
+    assert record.draws_unmutated > admitted / 2
+
+
+class OneDesign(Sampler):
+    """A sampler holding exactly one design, which is how a campaign exhausts.
+
+    Nothing exotic about the mechanism: the campaign refuses to re-measure a
+    design an earlier round already assayed, so an arm that can only produce one
+    thing fills its first plate and can never fill a second. That is the same
+    terminal condition a rejection GA reaches on a sparse feasible set, reached
+    in a tenth of a second and without depending on any particular landscape
+    being hard.
+    """
+
+    def __init__(self, length):
+        super().__init__()
+        self._length = length
+
+    def propose(self, n):
+        self._count(n)
+        return np.zeros((n, self._length), dtype=np.int32)
+
+
+def exhausting(task, seed):  # noqa: ARG001 - this arm cannot vary with its seed
+    """An arm that completes round zero and then has nothing left to propose."""
+    landscape = task.landscape()
+    return Campaign(
+        landscape=landscape,
+        sampler=OneDesign(landscape.sequence_length),
+        rounds=task.protocol.rounds,
+        batch_size=task.protocol.batch_size,
+        pool_size=task.protocol.batch_size,
+    )
+
+
+class TestAnExhaustedCampaign:
+    """The record a run that could not finish leaves behind.
+
+    Every failure here is an absence, and an absence is what nothing downstream
+    can catch: a missing record reads as a seed nobody ran, a zeroed metric reads
+    as a campaign that measured badly, and an exhausted seed folded into a mean
+    reads as a result.
+    """
+
+    @pytest.fixture
+    def task(self):
+        # A declared optimum, so that a regret *could* have been computed here.
+        # Against a task declaring none, `regret is None` would pass for the
+        # wrong reason and this would test nothing.
+        return toy_task(reanchor=False, attainable=Attainable.exactly(1.0, "declared for the test"))
+
+    @pytest.fixture
+    def stored_run(self, tmp_path, task):
+        store = ResultStore(tmp_path)
+        ran = run_task(task, {"stuck": exhausting}, store, [0], report=lambda _: None)
+        return store, ran
+
+    def test_the_seed_is_stored_rather_than_vanishing(self, stored_run, task):
+        store, ran = stored_run
+        held = store.load(task.name, "stuck")
+
+        assert 0 in held, "an arm that exhausted left no record, so it is absent from the store"
+        assert held[0].exhausted
+        # Counted as run, because it was: it cost a campaign's worth of time and
+        # is now held. A return of zero on a pass that wrote records is the one
+        # thing this number is read for.
+        assert ran == 1
+
+    def test_the_failure_is_not_run_again_on_the_next_sweep(self, stored_run, task):
+        # Stored and current, like any other record. Were it stale or unkeyed,
+        # every later sweep would pay for the same failure again -- and worse,
+        # the seed would keep reading as missing, which is the state this record
+        # exists to end.
+        store, _ = stored_run
+        assert store.missing(task.name, "stuck", [0]) == []
+
+    def test_it_holds_no_measurement_dressed_up_as_a_number(self, stored_run, task):
+        # `nan` and `None`, never zero. Zero is a measurement -- "found nothing
+        # good", "built nothing constructible" -- and it averages into a column
+        # beside real ones without anything to mark it, which is the failure this
+        # record was added to prevent rather than a milder form of it.
+        record = stored_run[0].load(task.name, "stuck")[0]
+
+        assert np.isnan(record.best)
+        assert record.regret is None
+        assert np.isnan(record.diversity)
+        assert np.isnan(record.feasible_fraction)
+        assert record.top_sequences == []
+
+    def test_it_says_how_far_the_campaign_actually_got(self, stored_run, task):
+        # A run that gave up in round four having measured 288 designs and one
+        # that gave up in round one having measured none are different findings,
+        # and a record that zeroed both would report them identically. The toy
+        # fills exactly one plate before it runs out of designs.
+        record = stored_run[0].load(task.name, "stuck")[0]
+
+        assert len(record.rounds) == 1
+        assert record.oracle_calls == task.protocol.batch_size
+        assert record.proposals >= task.protocol.batch_size
+        assert len(record.trace) == 1
+        assert record.wall_seconds > 0.0
+
+    def test_a_reader_that_averages_leaves_it_out(self, stored_run, task):
+        # The half of the fix that is easy to miss. Storing the failure puts a
+        # `nan` where every table reads a number, and one exhausted seed would
+        # otherwise turn a whole arm's mean into `nan` while the seed count went
+        # on claiming a full row. The exclusion is deliberate and the callers
+        # report the count separately.
+        failed = stored_run[0].load(task.name, "stuck")[0]
+        finished = replace(failed, seed=1, exhausted=False, best=0.5, regret=0.5)
+        held = {0: failed, 1: finished}
+
+        assert records_to_metric(held, [0, 1], "best") == pytest.approx([0.5])
+        assert records_to_metric(held, [0, 1], "regret") == pytest.approx([0.5])
+
+    def test_an_older_record_still_loads_as_a_campaign_that_finished(self, tmp_path):
+        # `exhausted` defaults to False, so every record written before the field
+        # existed keeps meaning what it meant. A default of True, or a required
+        # field, would silently reclassify or drop the whole store -- `load`
+        # skips a line it cannot build a record from, so a required field would
+        # make every stored campaign disappear rather than fail loudly.
+        assert not stored(tmp_path, toy_task(reanchor=True, attainable=None)).exhausted
+
+
+#: Training size at which MLDE hands over on the *unconstrained* toy inside this
+#: file's budget, and does not on the sparse one. Small on purpose: the point of
+#: the pair below is that one number produces both outcomes, so the difference
+#: between them is the constraint and nothing else.
+STARVED_TRAINING_SIZE = 8
+
+
+def mlde_arm(training_size, *, feasible_only=False):
+    """An MLDE arm at a chosen training size, so the handover can be forced either way.
+
+    Built through `classical` rather than as a bare sampler because the field
+    under test is written by `run_task` off ``campaign.sampler``, and what that
+    returns depends on how the methodology wrapped the sampler. A test against a
+    hand-built MLDE would pass while a wrapper in the real arm silently hid
+    ``is_fitted`` from the store.
+    """
+    return classical(
+        lambda env, seed, _protocol: MLDE(
+            env, training_size=training_size, feasible_only=feasible_only, seed=seed
+        )
+    )
+
+
+class TestWhetherTheModelEverFitted:
+    """The column that separates "fitted and lost" from "never fitted at all".
+
+    Nothing else stored says which. A supervised arm that never leaves its
+    random-screening stage charges the same oracle calls, fills the same plates,
+    makes the same proposals and reports a regret arithmetically
+    indistinguishable from a fitted one's -- so its row reads as a tuned
+    supervised baseline that was beaten fairly, which is a claim nobody measured.
+
+    The mechanism is not hypothetical and the first test below is it, measured:
+    [MLDE.observe][evogfn.algorithms.baselines.mlde.MLDE.observe] drops an
+    infeasible assay, having no fitness to regress on, so a sparse transition
+    matrix starves the training set while charging full price for it. On
+    `sparse_task` the feasible share is about 6%, which turns 64 assays into
+    roughly four usable measurements -- fewer than the smallest training size
+    that fits on the same budget without a constraint.
+
+    ``docs/limitations.md`` already records that ``mlde`` has never successfully
+    run. The point of these tests is that when it does, the store will say which
+    of the two things happened.
+    """
+
+    def test_a_constraint_that_starves_the_training_set_is_recorded(self, tmp_path):
+        """One arm, one budget, two landscapes: it fits on one and never on the other.
+
+        The pair is the test. Either record read alone is unremarkable -- both
+        completed, both spent the whole budget, both carry a finite ``best`` --
+        and the only thing that separates them is the field under test. Asserted
+        as a pair rather than as two independent facts because a field wired to a
+        constant would satisfy either one.
+        """
+        store = ResultStore(tmp_path)
+        unconstrained = toy_task(reanchor=False, attainable=None)
+        starved = sparse_task()
+        arm = {"mlde": mlde_arm(STARVED_TRAINING_SIZE)}
+        run_task(unconstrained, arm, store, [0], report=lambda _: None)
+        run_task(starved, arm, store, [0], report=lambda _: None)
+
+        fitted = store.load(unconstrained.name, "mlde")[0]
+        never = store.load(starved.name, "mlde")[0]
+
+        assert fitted.fitted is True
+        assert never.fitted is False
+        # And nothing else in the record tells them apart. Both ran to
+        # completion, both charged every assay their protocol allots, and both
+        # report a real number -- which is exactly why the row that never fitted
+        # would otherwise read as a supervised baseline that lost.
+        assert not fitted.exhausted
+        assert not never.exhausted
+        assert fitted.oracle_calls == never.oracle_calls
+        assert np.isfinite(fitted.best)
+        assert np.isfinite(never.best)
+        # The cause, stated so a failure here points at the mechanism rather
+        # than at the threshold: the starved run's assays were mostly
+        # unbuildable, and an unbuildable assay carries no fitness to regress on.
+        assert never.feasible_fraction < fitted.feasible_fraction
+
+    def test_an_arm_with_no_model_reports_nothing_rather_than_a_verdict(self, tmp_path):
+        # `None`, never `False`. Read by attribute, so a sampler carrying no such
+        # notion stores an absence -- and an absence is the honest record: a
+        # genetic algorithm did not fail to fit a model, it has no model. `False`
+        # here would put the failure marker on every classical row in the table.
+        assert stored(tmp_path, toy_task(reanchor=True, attainable=None)).fitted is None
+
+    @pytest.mark.parametrize(
+        ("training_size", "expected"),
+        # Same arm, same landscape, same failure: it draws only constructible
+        # candidates, the constraint is too sparse for that, and it fills four of
+        # sixteen wells in round one and stops. What differs is whether the plate
+        # it did fill was enough to hand over first. A run that gave up before
+        # its method ever started and one that gave up after are different
+        # findings, and the exhausted record is where a reader would look.
+        [(STARVED_TRAINING_SIZE, True), (96, False)],
+        ids=["fitted-then-stalled", "stalled-before-fitting"],
+    )
+    def test_a_campaign_that_gave_up_says_whether_it_got_as_far_as_its_model(
+        self, tmp_path, training_size, expected
+    ):
+        # The counters that explain a failure live on the sampler, never on the
+        # result it failed to produce, so the exhausted path reads the same
+        # helper as the completed one. `None` here would say the run failed
+        # without saying whether it failed before its method ever ran.
+        store = ResultStore(tmp_path)
+        task = sparse_task()
+        run_task(
+            task,
+            {"mlde-feasible": mlde_arm(training_size, feasible_only=True)},
+            store,
+            [0],
+            report=lambda _: None,
+        )
+        record = store.load(task.name, "mlde-feasible")[0]
+
+        assert record.exhausted
+        assert record.fitted is expected
+        assert len(record.rounds) == 1
+
+    def test_the_reader_counts_what_it_reported_and_what_never_fitted(self):
+        # Two numbers rather than one: a bare count of zero would read as "every
+        # arm fitted" on a table of arms that fit nothing at all.
+        held = {
+            0: _record(fitted=True),
+            1: _record(fitted=False),
+            2: _record(fitted=None),
+            3: _record(fitted=False, exhausted=True),
+        }
+
+        assert fit_status(held, [0, 1, 2, 3]) == (3, 2)
+        assert fit_status({2: held[2]}, [2]) == (0, 0)
+        # Seeds nobody ran are not evidence either way.
+        assert fit_status(held, [0, 9]) == (1, 0)
+
+    def test_the_reader_that_averages_is_not_the_reader_for_this(self):
+        # `records_to_metric` maps `None` to `nan` because for `regret` that
+        # absence should propagate. Routed through it, a column mixing an arm
+        # with a model and an arm without would come back part-`nan` and its mean
+        # would say nothing rather than saying "no arm fitted".
+        held = {0: _record(fitted=None), 1: _record(fitted=False)}
+        pulled = records_to_metric(held, [0, 1], "fitted")
+
+        assert np.isnan(pulled[0])
+        assert pulled[1] == 0.0
+        assert np.isnan(pulled.mean())
+        # Which is why the count is taken from the dedicated reader instead.
+        assert fit_status(held, [0, 1]) == (1, 1)
+
+
+def _record(*, fitted, exhausted=False):
+    """A minimal stored record, for exercising the readers without a campaign."""
+    return RunRecord(
+        task="toy",
+        method="arm",
+        seed=0,
+        protocol="toy",
+        best=float("nan") if exhausted else 0.5,
+        regret=None if exhausted else 0.5,
+        diversity=0.0,
+        feasible_fraction=1.0,
+        oracle_calls=0,
+        proposals=0,
+        fitted=fitted,
+        exhausted=exhausted,
+    )
 
 
 def test_the_stored_provenance_names_the_radius_and_the_anchor_rule(tmp_path):
@@ -466,6 +1047,216 @@ def test_the_density_rungs_the_audit_does_not_cover_declare_nothing():
             )
 
 
+# --------------------------------------------------------------------------
+# The two repetition counts, and the hop that carries them into a record.
+# --------------------------------------------------------------------------
+
+
+def a_round(**overrides) -> RoundRecord:
+    """A minimal round record, for testing the storage hop rather than a campaign."""
+    fields = {
+        "index": 0,
+        "proposed": 8,
+        "screened": 8,
+        "evaluated": 8,
+        "feasible": 8,
+        "best_in_round": 1.0,
+        "best_so_far": 1.0,
+        "mean_in_round": 1.0,
+        "batch_diversity": 0.0,
+    }
+    return RoundRecord(**{**fields, **overrides})
+
+
+def test_a_stored_round_carries_both_repetition_counts(tmp_path):
+    """Guards the hop that is not automatic and not loud when it is missed.
+
+    `_round_rows` builds its dict key by key, so a field added to `RoundRecord`
+    is present in memory, absent from every stored record, and silent about the
+    difference: nothing raises, the rounds still serialise, and the column
+    simply never exists. The pair is asserted together because they are only
+    readable together -- within-plate repetition and cross-round repetition are
+    different costs, and either one alone gets the other's attributed to it.
+    """
+    record = stored(tmp_path, toy_task(reanchor=True, attainable=None))
+
+    assert record.rounds
+    for row in record.rounds:
+        assert {"duplicates", "duplicate_fraction", "redundant", "redundant_fraction"} <= set(row)
+        # This arm runs with the campaign's memory on, so the count is a
+        # measurement rather than the absence tested below.
+        assert not np.isnan(row["redundant"])
+
+
+def test_a_round_that_never_consulted_a_memory_stores_nothing_rather_than_zero():
+    # Zero is a measurement -- "the memory refused nothing" -- and it would
+    # average into a column beside real ones as evidence that the arm never
+    # repeated itself. A campaign run without the screen never looked, which is
+    # the opposite finding, and `nan` is what the store already uses for a
+    # quantity nobody obtained.
+    absent = _round_rows([a_round(redundant=None)])[0]
+    measured = _round_rows([a_round(redundant=0)])[0]
+
+    assert np.isnan(absent["redundant"])
+    assert np.isnan(absent["redundant_fraction"])
+    assert measured["redundant"] == 0.0
+    assert measured["redundant_fraction"] == 0.0
+
+
+# --------------------------------------------------------------------------
+# The rejection curve: an axis, and a kernel that can actually travel it.
+# --------------------------------------------------------------------------
+
+#: The protein alphabet the diagnostic instance uses, for measuring a mutation
+#: kernel on its own terms.
+KERNEL_ALPHABET = Alphabet.from_string("ACDEFGHIKLMNPQRSTVWY")
+
+#: The diagnostic instance's length, which is what ``p_m = 1/L`` is one over.
+KERNEL_LENGTH = 32
+
+
+def substitutions(build, radius, n=512):
+    """Mean substitutions an arm's offspring carry at a given per-round radius.
+
+    Measured with **nothing forbidden**, so the number is the mutation kernel's
+    and not the feasibility filter's. That separation is the entire point of the
+    arm being tested: an acceptance rate that stops falling as the radius widens
+    means either that the filter has stopped refusing or that the kernel stopped
+    producing anything for it to refuse, and only a measurement taken without a
+    filter can tell those apart.
+    """
+    parent = np.zeros(KERNEL_LENGTH, dtype=np.int32)
+    env = MutationEnvironment(parent, KERNEL_ALPHABET, max_mutations=radius)
+    offspring = np.asarray(build(env, 0, DIAGNOSTIC_PROTOCOL).propose(n))
+    return float((offspring != parent).sum(axis=1).mean())
+
+
+def published_kernel(env, seed, _protocol):
+    """``genetic-feasible``'s sampler, built here for what it does *not* pass.
+
+    Its builder is private to the methods module, and the argument under test is
+    the one neither of them supplies: a mutation rate. The default is Stanton et
+    al.'s ``p_m = 1/L``, and the claim is that it does not move with the radius.
+    """
+    from evogfn.algorithms.baselines.genetic import GeneticAlgorithm  # noqa: PLC0415
+
+    return GeneticAlgorithm(env, seed=seed, feasible_only=True, max_attempts=200)
+
+
+def test_the_rejection_sweep_reuses_the_task_it_already_defines():
+    # Same failure the density sweep's version guards, in the family that would
+    # hit it hardest: the store keys on (task, arm), so a rung defined as a
+    # renamed copy of the shared diagnostic runs its campaigns a second time and
+    # files them where nothing compares them to the first.
+    rungs = {task.name: task for task in rejection_curve()}
+    shared = objective_task()
+
+    assert shared.name in rungs, (
+        f"the rejection sweep defines {sorted(rungs)} and none of them is {shared.name}, "
+        f"so the rung at radius {DIAGNOSTIC_MUTATIONS} is a twin of a task that already exists"
+    )
+    reused = rungs[shared.name]
+    assert repr(reused) == repr(shared)
+    assert reused.attainable == shared.attainable
+    assert reused.build is shared.build
+
+
+def test_every_rejection_rung_varies_the_radius_and_nothing_else():
+    # A sweep whose rungs differ in a second parameter is not measuring its own
+    # axis, and nothing downstream could tell: every rung would still produce an
+    # acceptance rate, and the curve through them would still look like a curve.
+    tasks = rejection_curve()
+
+    assert len({instance_shape(task) for task in tasks}) == 1
+    assert len({permitted_share(task) for task in tasks}) == 1
+    assert {task.protocol.budget for task in tasks} == {objective_task().protocol.budget}
+    assert {task.reanchor for task in tasks} == {True}
+    assert [task.max_mutations for task in tasks] == list(REJECTION_RADII)
+
+
+def test_the_rejection_axis_brackets_the_radius_every_other_diagnostic_runs_at():
+    # An axis that only widens cannot say whether the shared radius sits on a
+    # slope or on a plateau, and an axis that only narrows cannot reach the
+    # region where the published kernel runs out of proposal mass -- which is
+    # the confound the family exists to make visible rather than assume away.
+    assert list(REJECTION_RADII) == sorted(REJECTION_RADII)
+    assert min(REJECTION_RADII) < DIAGNOSTIC_MUTATIONS < max(REJECTION_RADII)
+    # And the widest rung is still a real constraint at L=32 rather than a
+    # formality that reaches every sequence.
+    assert max(REJECTION_RADII) < KERNEL_LENGTH
+
+
+def test_the_rejection_rungs_the_audit_does_not_cover_declare_nothing():
+    # In both directions and for two reasons. The narrow rungs reach a strictly
+    # smaller set than `DIAGNOSTIC_ATTAINABLE` was audited over, so its value
+    # would be a floor no method on them could clear; the wide rungs reach a
+    # larger set nobody has audited at all. Either way a borrowed bound is the
+    # failure the attainability mechanism exists to prevent.
+    shared = objective_task()
+    for task in rejection_curve():
+        if task.name == shared.name:
+            assert task.attainable is not None
+        else:
+            assert task.attainable is None, (
+                f"{task.name} declares an attainable optimum nobody audited at its radius"
+            )
+
+
+def test_the_published_kernel_does_not_follow_the_radius():
+    """The confound, as a measurement rather than as a caveat in prose.
+
+    ``p_m = 1/L`` makes the substitution count Poisson(1) at *every* rung, so
+    widening the radius changes almost nothing about what gets proposed. A
+    flat acceptance rate over the wide rungs is therefore the kernel and not the
+    filter, and a claim that reads it as the filter is the overreach the second
+    column exists to prevent.
+    """
+    counts = [substitutions(published_kernel, radius) for radius in REJECTION_RADII]
+
+    assert counts[-1] == pytest.approx(1.0, abs=0.4), (
+        f"the published kernel carries {counts[-1]:.2f} substitutions at a radius of "
+        f"{REJECTION_RADII[-1]}; if it followed the axis this family would need no second arm"
+    )
+    assert max(counts) < 2.0
+
+
+def test_the_matched_kernel_reaches_the_radii_the_published_one_never_does():
+    # The separation, as an assertion. Without a column whose proposals actually
+    # carry the substitutions the axis permits, the wide rungs measure an empty
+    # region and the family assumes what it was built to test.
+    matched = [substitutions(_matched_kernel_genetic, radius) for radius in REJECTION_RADII]
+    published = [substitutions(published_kernel, radius) for radius in REJECTION_RADII]
+
+    assert matched == sorted(matched)
+    assert matched[-1] > 0.5 * REJECTION_RADII[-1]
+    assert matched[-1] > 5 * published[-1]
+    # The axis's own control: at a radius of one the matched rate *is* 1/L, so
+    # the two arms are the same configuration and must measure the same thing. A
+    # gap here would be a fault in the measurement rather than a kernel effect,
+    # and it would be invisible anywhere else on the axis.
+    assert matched[0] == pytest.approx(published[0])
+
+
+def test_the_rejection_arms_differ_in_the_kernel_and_in_nothing_else():
+    # An attribution test. The whole family is read as "the difference between
+    # these two columns is the mutation rate", and a second difference -- a
+    # surrogate, a wider pool, another plate rule -- would be silently folded
+    # into that reading.
+    arms = rejection_arms()
+    # Read by attribute, which is how `run_task` reads them -- so this compares
+    # what the two arms would actually store rather than what they hold.
+    published = dict(getattr(BASELINES["genetic-feasible"], "parameters", {}))
+    matched = dict(getattr(arms["genetic-feasible-matched"], "parameters", {}))
+
+    # Looked up rather than rebuilt, so the shipped cell stays the cell the
+    # store already keys.
+    assert arms["genetic-feasible"] is BASELINES["genetic-feasible"]
+    assert matched["sampler"] == "matched-kernel-genetic"
+    assert {k: v for k, v in matched.items() if k != "sampler"} == {
+        k: v for k, v in published.items() if k != "sampler"
+    }
+
+
 def test_the_fixed_anchor_control_is_the_diagnostic_task_with_one_thing_changed():
     # A control that differs in two things controls for neither. The anchor rule
     # is the axis; the instance, the protocol and the radius are held.
@@ -556,3 +1347,113 @@ def test_a_methodology_that_states_no_settings_stores_an_empty_mapping(tmp_path)
     run_task(task, {"anonymous": unwrapped(BASELINES["random"])}, store, [0], report=lambda _: None)
 
     assert store.load(task.name, "anonymous")[0].parameters == {}
+
+
+def _motifs(task) -> bytes:
+    """The planted motifs, which are what distinguishes one Ehrlich draw."""
+    landscape = task.landscape()
+    assert isinstance(landscape, EhrlichLandscape)
+    return bytes(landscape.motifs.tobytes())
+
+
+class TestReplication:
+    """The replicates exist to vary one thing, so the test is that they vary one thing."""
+
+    def _headline(self, shape):
+        return next(t for t in MAIN if t.name == f"protocol-{shape}")
+
+    @pytest.mark.parametrize("shape", ["alde", "evolvepro"])
+    def test_a_replicate_differs_from_its_headline_task_only_in_the_draw(self, shape):
+        # The whole value of a replicate is that a difference in its result is a
+        # difference between instances. Any other axis drifting -- a radius, a
+        # round count, the anchor rule -- would make the comparison measure that
+        # instead, and would do so invisibly, since both tasks would still run
+        # and still report a number.
+        headline = self._headline(shape)
+        for task in replication():
+            if not task.name.startswith(f"replicate-{shape}-"):
+                continue
+            assert task.protocol.rounds == headline.protocol.rounds
+            assert task.protocol.batch_size == headline.protocol.batch_size
+            assert task.max_mutations == headline.max_mutations
+            assert task.reanchor == headline.reanchor
+
+    @pytest.mark.parametrize("shape", ["alde", "evolvepro"])
+    def test_every_replicate_draws_a_different_landscape(self, shape):
+        # Two replicates on one draw would look like independent evidence and be
+        # a repeat, which is the failure this whole tier was added to fix.
+        #
+        # Compared on the motifs rather than on the optimum: every Ehrlich
+        # instance is built so its optimum is 1.0, so an optimum-based check
+        # would pass on three copies of the same landscape.
+        drawn = {
+            _motifs(task) for task in replication() if task.name.startswith(f"replicate-{shape}-")
+        }
+        assert len(drawn) == len(REPLICATION_SEEDS)
+
+    @pytest.mark.parametrize("shape", ["alde", "evolvepro"])
+    def test_no_replicate_redraws_the_headline_instance(self, shape):
+        # Distinct seeds are necessary and not sufficient: two seeds could in
+        # principle land on the same motifs, and that replicate would be
+        # answering the question by restating it.
+        headline = _motifs(self._headline(shape))
+        for task in replication():
+            if task.name.startswith(f"replicate-{shape}-"):
+                assert _motifs(task) != headline
+
+    def test_no_replicate_reuses_the_shared_instance(self):
+        # Seed 2 is the draw both headline tasks share; a replicate on it would
+        # answer the question by restating it.
+        assert 2 not in REPLICATION_SEEDS
+
+    def test_the_replicates_are_named_apart_from_the_headline_tasks(self):
+        # Store keys are file names, so a collision would append a replicate's
+        # campaigns to the headline task's own record file.
+        assert {t.name for t in replication()}.isdisjoint({t.name for t in MAIN})
+
+    def test_a_replicate_name_round_trips_to_its_shape_and_draw(self):
+        # Every reader that treats the landscape draw as the unit of replication
+        # has to know which tasks are draws *of the same thing*, and it learns
+        # that by reading the name back. A parser that stopped matching would not
+        # raise: it would report every replicate as belonging to no family, which
+        # yields no per-instance section at all -- and an analysis silently
+        # reverting to the pooled one is the failure the section exists to stop.
+        for shape, draw in ((s, d) for s in ("alde", "evolvepro") for d in REPLICATION_SEEDS):
+            name = next(
+                t.name for t in replication() if replicate_instance(t.name) == (shape, draw)
+            )
+            assert replicate_instance(name) == (shape, draw)
+
+    def test_a_task_that_is_not_a_replicate_reads_as_none(self):
+        # `None` is the answer for most tasks and has to stay a real answer
+        # rather than a failure, or the grouping would put headline tasks into
+        # instance families of their own.
+        assert all(replicate_instance(task.name) is None for task in MAIN)
+
+    def test_the_draws_are_a_parameter_so_a_pilot_measures_the_tier_itself(self):
+        # The variance pilot needs these tasks at draws the tier does not run. A
+        # second builder written for it would differ from this one in whatever
+        # the next edit here touched, and the pilot would then be sizing a design
+        # for tasks nobody runs.
+        piloted = replication((101, 102))
+        split = {task.name: replicate_instance(task.name) for task in (*piloted, *replication())}
+        assert all(value is not None for value in split.values())
+
+        assert {split[t.name][1] for t in piloted} == {101, 102}  # type: ignore[index]
+        assert {split[t.name][0] for t in piloted} == {"alde", "evolvepro"}  # type: ignore[index]
+        for task in piloted:
+            twin = next(
+                t
+                for t in replication()
+                if split[t.name][0] == split[task.name][0]  # type: ignore[index]
+            )
+            assert task.protocol == twin.protocol
+            assert task.max_mutations == twin.max_mutations
+            assert task.reanchor == twin.reanchor
+
+    def test_a_repeated_draw_is_refused(self):
+        # Two tasks built from one seed are one instance under two store keys,
+        # and would read as two draws agreeing -- which is the exact reading the
+        # tier exists to make possible and must therefore not be able to fake.
+        with pytest.raises(ValueError, match="must be distinct"):
+            replication((3, 3))

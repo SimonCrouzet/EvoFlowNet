@@ -9,6 +9,8 @@ answer is known by construction.
 """
 
 import json
+import multiprocessing
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -216,6 +218,44 @@ def test_a_record_without_a_fingerprint_is_treated_as_current(store):
     assert set(store.usable("t", "m")) == {0}
 
 
+class TestWhetherAModelWasFitted:
+    """``fitted`` is tri-valued, and the third value is the one doing the work.
+
+    ``True`` and ``False`` are measurements about an arm that fits something.
+    ``None`` says nobody measured -- either the arm has no model, or the record
+    predates the field. Collapsing ``None`` into ``False`` is what would let a
+    genetic algorithm be reported as a supervised method that never fitted, and
+    collapsing it the other way is what let a supervised arm that never fitted be
+    reported as one that fitted and lost.
+    """
+
+    def test_it_defaults_to_unmeasured_rather_than_to_a_verdict(self):
+        # `False` as the default would retroactively accuse every campaign
+        # already on disk of the failure this field was added to detect, and
+        # `True` would clear them all of it. Neither is something anyone
+        # measured.
+        assert RunRecord(**RECORD_FIELDS).fitted is None
+
+    def test_a_record_written_before_the_field_existed_still_loads(self, store):
+        # `load` builds by keyword from the stored payload and skips a line it
+        # cannot build a record from, so a required field would make every
+        # campaign already on disk vanish rather than fail loudly.
+        path = store.root / "t"
+        path.mkdir(parents=True)
+        (path / "m.jsonl").write_text(json.dumps(RECORD_FIELDS) + "\n")
+
+        assert store.load("t", "m")[0].fitted is None
+
+    @pytest.mark.parametrize("value", [True, False, None])
+    def test_every_state_survives_a_round_trip(self, store, value):
+        # `asdict` is what `append` serialises through and `RunRecord(**payload)`
+        # is what `load` rebuilds with. A `False` that came back as `None` would
+        # turn the finding into an absence on exactly the rows that carry it.
+        store.append(RunRecord(**RECORD_FIELDS, fitted=value))
+
+        assert store.load("t", "m")[0].fitted is value
+
+
 def test_cost_and_duplicate_fields_survive_a_round_trip(store):
     """Guards a cost column that reads back as zero for every arm.
 
@@ -421,3 +461,51 @@ def test_bless_leaves_an_unfingerprinted_record_alone(store):
     assert reopened.bless("t", "m", modules=["pkg.leaf"]) == 0
     assert reopened.load("t", "m")[0].source == {}
     assert reopened.blessed("t", "m") == {}
+
+
+def _hammer(args):
+    """One writer process, appending oversized records to a shared arm file."""
+    root, tag, count = args
+    store = ResultStore(Path(root))
+    for seed in range(count):
+        store.append(
+            RunRecord(
+                task="race",
+                method="arm",
+                seed=seed * 100 + tag,
+                protocol="p",
+                best=1.0,
+                regret=0.0,
+                diversity=1.0,
+                feasible_fraction=1.0,
+                oracle_calls=1,
+                proposals=1,
+                # Deliberately far past the size at which the kernel makes an
+                # append atomic. A small record would pass this test whether or
+                # not the lock existed, which is how the bug reached the store
+                # in the first place.
+                top_sequences=[[i % 7 for i in range(600)] for _ in range(10)],
+            )
+        )
+    return tag
+
+
+def test_concurrent_writers_never_tear_a_record(tmp_path):
+    """Guards the failure that is silent in both directions.
+
+    Sharding a suite by seed puts several processes on one arm's file. A record
+    here runs to tens of kilobytes against a four-kilobyte atomicity limit, so
+    without a lock two appends interleave and leave a line that parses as
+    nothing -- and `load` skips what it cannot parse, so the campaign does not
+    come back damaged, it simply disappears and the seed looks unrun.
+    """
+    writers, each = 4, 15
+    with multiprocessing.Pool(writers) as pool:
+        pool.map(_hammer, [(str(tmp_path), tag, each) for tag in range(writers)])
+
+    lines = [
+        line for line in (tmp_path / "race" / "arm.jsonl").read_text().splitlines() if line.strip()
+    ]
+    for line in lines:
+        json.loads(line)  # raises if any record was torn
+    assert len(lines) == writers * each

@@ -51,31 +51,69 @@ uniform over the alphabet, a uniform sequence satisfies a long adjacency chain
 with vanishing probability, and every design the arm emits is infeasible.
 Rejection is no remedy at that density; it is not expensive, it is impossible.
 
-So the projection is completed rather than the method abandoned. Feasibility
-here is a **first-order chain** constraint, so the highest-scoring sequence
-subject to *both* the adjacency rule and the mutation budget is the Viterbi path
-of a dynamic program over ``(position, token, counter)``, computed exactly in
-``O(n * L * V^2 * K)`` by ``_project_onto_constructible``.
-It always succeeds, because the anchor itself is a feasible sequence at zero
-mutations, so the feasible set the projection searches is never empty. The cost
-is wall clock rather than oracle calls or proposals -- ``proposals_made`` stays
-at one per design -- and
+So the projection is completed rather than the method abandoned. Three
+constraints have to hold at once and each is local: the adjacency rule is a
+**first-order chain** condition on a token pair, the mutation budget is a
+cardinality condition, and *constructibility* -- that some ordering of the
+substitutions keeps every intermediate feasible -- reduces, by the argument in
+[is_constructible][evogfn.env.mutation.MutationEnvironment.is_constructible], to
+one further condition per adjacent pair. So the highest-scoring sequence subject
+to all three is the Viterbi path of a dynamic program over
+``(position, token, counter)``, computed exactly in ``O(n * L * V^2 * K)`` by
+``_project_onto_constructible``. It always succeeds, because the anchor itself is
+a feasible sequence at zero substitutions and so constrains no ordering, which
+makes the set the projection searches non-empty by construction. The cost is wall
+clock rather than oracle calls or proposals -- ``proposals_made`` stays at one
+per design -- and
 [repaired_fraction][evogfn.algorithms.baselines.cmaes.CMAES.repaired_fraction]
 reports how often the raw argmax was unbuildable, which is the number that says
 how much of the arm's behaviour is the relaxation's and how much the
 projection's.
 
-Two things this does *not* claim. The distribution still spends its mass on
-infeasible logit configurations and only ever sees the landscape through the
-projection, so what it learns is the composition of the two -- ranks of repaired
-designs -- and not the landscape. And the projection guarantees membership of
-the environment's *reachable set* as
-[is_reachable][evogfn.env.mutation.MutationEnvironment.is_reachable] defines it,
-which is feasibility plus budget; it does not guarantee that some ordering of
-those substitutions is itself feasible at every intermediate step. That stricter
-notion is what
+Which set the projection targets is the whole of the comparison
+---------------------------------------------------------------
+
+The set has to be the environment's own, and the two candidate answers differ.
+[is_reachable][evogfn.env.mutation.MutationEnvironment.is_reachable] is budget
+plus endpoint feasibility; the environment's masks additionally require a legal
+construction order, which is what
 [reachable_terminal_states][evogfn.env.mutation.MutationEnvironment.reachable_terminal_states]
-enumerates, and no baseline here targets it.
+enumerates. **Projecting onto the looser set is not a milder version of the
+constraint, it is a different search space**: every masked arm is confined to the
+construction graph, so an arm projected onto the endpoint condition alone selects
+over designs the others are forbidden to propose, and its regret against an
+attainable optimum derived from the construction graph has no floor at zero. A
+regret below that floor is a symptom of an arm outside the space, never a result.
+The projection therefore reads
+[constrains_intermediates][evogfn.env.mutation.MutationEnvironment.constrains_intermediates]
+off the environment and enforces the ordering condition exactly where the
+environment does, so the arm is confined to the same graph as every other and no
+comparison is being drawn across two spaces.
+
+What this still does *not* claim: the distribution spends its mass on infeasible
+logit configurations and only ever sees the landscape through the projection, so
+what it learns is the composition of the two -- ranks of repaired designs -- and
+not the landscape.
+
+Why the arm stays in the suite even where it collapses
+-------------------------------------------------------
+
+Two statements, and they must not be merged. **First**, CMA-ES is a standard
+baseline for this problem: it appears in Jain et al. (ICML 2022), in
+Design-Bench, in FLEXS and in the high-dimensional Bayesian-optimisation
+literature, and Design-Bench decodes a continuous relaxation by per-position
+argmax exactly as the decoder above does. Its published behaviour is
+length-dependent -- competitive on short sequences, degrading as the sequence
+grows -- so an unbounded regret on this package's long constrained tasks
+corroborates a documented failure mode rather than indicating a broken arm.
+
+**Second**, and separately, nothing in that literature says anything about which
+set *this* decoder projects onto. Whether the arm is confined to the same
+construction graph as every other is a property of the code above, established by
+the tests beside it and by no citation. The two statements are kept apart because
+merging them is how a defect in the projection would come to be read as the
+published failure mode and go unexamined: a reference explains a bad score, it
+never licenses one.
 
 Why the covariance is diagonal
 ------------------------------
@@ -106,12 +144,26 @@ author chose rather than one convenient to us.
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 
 from evogfn.algorithms.base import Sampler
 from evogfn.algorithms.baselines._values import single_objective
+
+#: How a decoded design that the environment cannot build is dealt with.
+#:
+#: ``"none"`` emits it anyway, which on a constrained instance means emitting
+#: nothing usable and is the published method's own behaviour. ``"greedy"``
+#: accepts substitutions by descending gain while the design stays legal --
+#: the obvious adaptation, and the reported default, so the baseline's score is
+#: what a practitioner would get. ``"exact"`` returns the highest-scoring legal
+#: design by dynamic programming, which is stronger than anything the literature
+#: specifies and is kept for measuring what an engineered decoder is worth
+#: rather than for reporting the method.
+RepairPolicy = Literal["none", "greedy", "exact"]
+
+_REPAIR_POLICIES: frozenset[str] = frozenset({"none", "greedy", "exact"})
 
 if TYPE_CHECKING:
     import numpy.typing as npt
@@ -216,11 +268,162 @@ def _budgeted_argmax(
     return chosen
 
 
+def _transition_barrier(
+    parent: Tokens,
+    permitted: npt.NDArray[np.bool_],
+    *,
+    ordered: bool,
+) -> npt.NDArray[np.float64]:
+    """The additive penalty the recursion pays to put one token beside another.
+
+    Two conditions live here, and separating them is the point of the function.
+    The first is the environment's adjacency rule, which is a property of the
+    pair of tokens alone. The second is *constructibility*: the destination must
+    admit an ordering of its substitutions along which every intermediate is
+    feasible too, which
+    [is_constructible][evogfn.env.mutation.MutationEnvironment.is_constructible]
+    shows reduces to one condition per adjacent pair -- and only where both of
+    its positions are substituted, since a pair with a position still at the
+    anchor passes through no state the destination and the anchor do not already
+    vouch for. Where both are substituted, one of them has to go first, and the
+    mixed state that order passes through must be permitted.
+
+    A constraint that mentions the anchor's tokens is not a property of the token
+    pair, which is why the result carries a position axis where the adjacency
+    rule alone would not.
+
+    Args:
+        parent: The anchor, shape ``(length,)``.
+        permitted: A ``(vocabulary, vocabulary)`` boolean matrix, ``True`` where
+            the row's token may be followed by the column's.
+        ordered: Whether the environment constrains intermediates, from
+            [constrains_intermediates][evogfn.env.mutation.MutationEnvironment.constrains_intermediates].
+            When ``False`` the ordering condition is dropped: that environment
+            refuses no ordering, so imposing one would narrow the projection to a
+            strict subset of what the arm is allowed to propose.
+
+    Returns:
+        A ``(length, vocabulary, vocabulary)`` array, entry ``[i, u, t]`` being
+        ``0.0`` when token ``t`` at position ``i - 1`` may be followed by token
+        ``u`` at position ``i`` and ``-inf`` otherwise. The predecessor is the
+        last axis because that is the axis the recursion reduces over, and entry
+        ``[0]`` is never read -- the first position has no predecessor.
+    """
+    anchor = np.asarray(parent)
+    length = int(anchor.shape[0])
+    vocabulary = int(permitted.shape[0])
+
+    allowed = np.broadcast_to(permitted.T, (length, vocabulary, vocabulary)).copy()
+    if ordered and length > 1:
+        tokens = np.arange(vocabulary)
+        left, right = anchor[:-1], anchor[1:]
+        # Whether each candidate token is a substitution at the position it would
+        # occupy: the anchor's own token is not, and imposes nothing.
+        left_substitutes = tokens[None, :] != left[:, None]
+        right_substitutes = tokens[None, :] != right[:, None]
+        # The two mixed states, one per order in which the pair could be written.
+        left_first = permitted[tokens[None, :], right[:, None]]
+        right_first = permitted[left[:, None], tokens[None, :]]
+        allowed[1:] &= (
+            ~(right_substitutes[:, :, None] & left_substitutes[:, None, :])
+            | left_first[:, None, :]
+            | right_first[:, :, None]
+        )
+    return np.where(allowed, 0.0, -np.inf)
+
+
+#: Candidate substitutions the greedy repair tries per unit of mutation budget.
+#: Each costs one batched constructibility check, so this trades decode time
+#: against how often the repair gives up below budget on a dense instance.
+_GREEDY_ATTEMPTS_PER_SUBSTITUTION = 12
+
+
+def _greedy_repair(
+    logits: npt.NDArray[np.float64],
+    parent: Tokens,
+    env: MutationEnvironment,
+    budget: int,
+) -> Tokens:
+    """Accept substitutions by descending logit gain, keeping the design legal.
+
+    The straightforward repair, and the one a practitioner reaches for: start at
+    the parent -- feasible by definition, and at zero substitutions it constrains
+    no ordering -- then take the highest-gain substitution that leaves the design
+    constructible, and repeat until the budget is spent or nothing legal is left.
+
+    It is **approximate**, and that is the point of having it. A substitution
+    taken early can foreclose a pair that a later, larger gain needed, so the
+    result can score below the best legal sequence; the exact projection beside
+    it never does. Reporting a baseline through this decoder therefore states
+    what the method achieves under an obvious adaptation rather than under an
+    engineered one, and the gap between the two decoders is the cost of that
+    obviousness rather than a property of the search distribution.
+
+    Legality is re-checked against the environment after each accepted
+    substitution rather than argued from the previous state. The condition is
+    pairwise, so a substitution can only break the pairs it touches -- but a
+    decoder that tracked that itself would be a second implementation of the
+    constraint, and the two would drift.
+
+    Args:
+        logits: An ``(n, length, vocabulary)`` array of per-position scores.
+        parent: The anchor, which every row starts from.
+        env: The environment whose graph the result must lie in.
+        budget: Substitutions allowed per row.
+
+    Returns:
+        An ``(n, length)`` array, every row constructible.
+    """
+    rows, length, size = logits.shape
+    current = np.tile(parent, (rows, 1))
+    if budget <= 0 or rows == 0:
+        return current
+
+    # Gain of each substitution against staying put. Reverting to the parent's
+    # own token is not a substitution, so it is scored at negative infinity
+    # rather than at zero, which would let a row spend budget on a change it did
+    # not make.
+    held = np.broadcast_to(parent[None, :, None], (rows, length, 1))
+    gains = logits - np.take_along_axis(logits, held, axis=2)
+    gains[:, np.arange(length), parent] = -np.inf
+    flat = gains.reshape(rows, -1)
+
+    # Only the strongest candidates are tried. Each attempt costs one batched
+    # constructibility check, so scanning the whole (length x vocabulary) list
+    # would cost thousands of them per round for substitutions no greedy rule
+    # would reach anyway -- the budget is spent long before. A row whose top
+    # candidates are all illegal ends with fewer substitutions than the budget
+    # allows, which is a real weakness of greedy repair and is left visible
+    # rather than papered over by widening the scan.
+    attempts = int(min(flat.shape[1], _GREEDY_ATTEMPTS_PER_SUBSTITUTION * budget))
+    order = np.argpartition(-flat, attempts - 1, axis=1)[:, :attempts]
+    ranked = np.argsort(-np.take_along_axis(flat, order, axis=1), axis=1)
+    order = np.take_along_axis(order, ranked, axis=1)
+
+    index = np.arange(rows)
+    spent = np.zeros(rows, dtype=np.int64)
+    for step in range(attempts):
+        live = spent < budget
+        if not live.any():
+            break
+        choice = order[:, step]
+        position, token = choice // size, choice % size
+        candidate = current.copy()
+        offered = live & np.isfinite(flat[index, choice])
+        candidate[index[offered], position[offered]] = token[offered]
+        legal = env.is_constructible(candidate) & offered
+        current[legal] = candidate[legal]
+        spent += legal
+    return current
+
+
 def _project_onto_constructible(
     logits: npt.NDArray[np.float64],
     parent: Tokens,
     permitted: npt.NDArray[np.bool_],
     budget: int,
+    *,
+    ordered: bool = True,
 ) -> Tokens:
     """Highest-scoring sequence per row that the environment can build.
 
@@ -228,18 +431,22 @@ def _project_onto_constructible(
     sequence by the sum of its chosen logits, the unconstrained maximiser is the
     argmax at each position independently; under a first-order adjacency rule the
     maximiser is instead a Viterbi path, and under a mutation budget as well it
-    is a Viterbi path over ``(token, counter)`` pairs. Nothing is approximated:
-    the returned sequence is the exact maximiser over the constructible set, so
-    the projection never discards more of the search distribution's signal than
-    the constraint forces it to.
+    is a Viterbi path over ``(token, counter)`` pairs. Constructibility is the
+    third constraint and costs no extra state, because it too reduces to a
+    condition on adjacent pairs -- see
+    [_transition_barrier][evogfn.algorithms.baselines.cmaes._transition_barrier].
+    Nothing is approximated: the returned sequence is the exact maximiser over
+    the set the environment can construct, so the projection never discards more
+    of the search distribution's signal than the constraint forces it to, and
+    never returns a design the environment could not have built.
 
     **It cannot fail on a well-formed environment.** The anchor is a sequence of
-    zero substitutions, so it is inside the budget, and an environment whose own
-    anchor violates the adjacency rule could not build anything at all. The
-    feasible set is therefore non-empty and the dynamic program always returns
-    something. Rows for which it does not -- only reachable by handing this an
-    infeasible anchor -- fall back to the anchor itself, which is then equally
-    unbuildable and will be reported as such rather than dressed up.
+    zero substitutions, so it is inside the budget, it is feasible, and having no
+    substitutions at all it constrains no ordering. The constructible set is
+    therefore non-empty and the dynamic program always returns something. Rows
+    for which it does not -- only reachable by handing this an infeasible anchor
+    -- fall back to the anchor itself, which is then equally unbuildable and will
+    be reported as such rather than dressed up.
 
     Args:
         logits: An ``(n, length, vocabulary)`` array of per-position scores.
@@ -247,19 +454,22 @@ def _project_onto_constructible(
         permitted: A ``(vocabulary, vocabulary)`` boolean matrix, ``True`` where
             the row's token may be followed by the column's.
         budget: Most substitutions from the anchor the environment admits.
+        ordered: Whether the environment constrains intermediates and the
+            ordering condition therefore applies.
 
     Returns:
-        An ``(n, length)`` array of token indices, every row satisfying the
-        adjacency rule and the budget.
+        An ``(n, length)`` array of token indices, every row inside the budget
+        and constructible by the environment the arguments describe.
     """
     n, length, vocabulary = logits.shape
     if length == 0:  # pragma: no cover - an empty environment builds nothing
         return np.zeros((n, 0), dtype=np.asarray(parent).dtype)
 
     cap, retained = _projection_counter(length, budget)
+    barrier = _transition_barrier(parent, permitted, ordered=ordered)
     block = max(1, _PROJECTION_BLOCK // max(1, vocabulary * vocabulary * (cap + 1)))
     pieces = [
-        _project_block(logits[start : start + block], parent, permitted, cap, retained=retained)
+        _project_block(logits[start : start + block], parent, barrier, cap, retained=retained)
         for start in range(0, n, block)
     ]
     return np.concatenate(pieces) if pieces else np.zeros((0, length), dtype=parent.dtype)
@@ -268,7 +478,7 @@ def _project_onto_constructible(
 def _project_block(
     logits: npt.NDArray[np.float64],
     parent: Tokens,
-    permitted: npt.NDArray[np.bool_],
+    barrier: npt.NDArray[np.float64],
     cap: int,
     *,
     retained: bool,
@@ -282,7 +492,9 @@ def _project_block(
     Args:
         logits: An ``(m, length, vocabulary)`` block of per-position scores.
         parent: The anchor, shape ``(length,)``.
-        permitted: The ``(vocabulary, vocabulary)`` adjacency rule.
+        barrier: The ``(length, vocabulary, vocabulary)`` penalty from
+            [_transition_barrier][evogfn.algorithms.baselines.cmaes._transition_barrier],
+            carrying both the adjacency rule and the ordering condition.
         cap: Largest counter value tracked, from
             [_projection_counter][evogfn.algorithms.baselines.cmaes._projection_counter].
         retained: Whether the counter counts positions left at the anchor, in
@@ -295,10 +507,6 @@ def _project_block(
     m, length, vocabulary = logits.shape
     states = cap + 1
     counter = np.arange(states, dtype=np.int16)
-    # -inf on a forbidden adjacency, added rather than masked so the recursion is
-    # one broadcast add. Transposed to put the predecessor on the last axis,
-    # which is the axis the reductions run over.
-    barrier = np.where(permitted, 0.0, -np.inf).T.copy()
 
     back_token = np.zeros((length, m, vocabulary, states), dtype=np.int16)
     back_state = np.zeros((length, m, vocabulary, states), dtype=np.int16)
@@ -320,9 +528,10 @@ def _project_block(
         score[:, opening, 0] = logits[:, 0, opening]
 
     for position in range(1, length):
-        # Best predecessor for every (successor token, counter) pair. The
-        # adjacency rule enters the recursion here and nowhere else.
-        candidates = np.moveaxis(score, 1, -1)[:, None, :, :] + barrier[None, :, None, :]
+        # Best predecessor for every (successor token, counter) pair. Both the
+        # adjacency rule and the ordering condition enter the recursion here and
+        # nowhere else, which is why the barrier is indexed by position.
+        candidates = np.moveaxis(score, 1, -1)[:, None, :, :] + barrier[position][None, :, None, :]
         best, token, held = _advance(
             candidates.max(axis=-1),
             candidates.argmax(axis=-1).astype(np.int16),
@@ -490,10 +699,11 @@ class CMAES(Sampler):
             and the step-size adaptation corrects the scale within a few
             generations anyway.
         repair: Decode through the constrained projection rather than a plain
-            per-position argmax, so that every emitted design satisfies the
-            environment's adjacency rule as well as its mutation budget. On by
-            default, and the reason this baseline reports a finite score at all
-            on a sparse feasible set; see the module docstring. Passing
+            per-position argmax, so that every emitted design is one the
+            environment can build: inside the mutation budget, obeying the
+            adjacency rule, and reachable by some ordering of its substitutions.
+            On by default, and the reason this baseline reports a finite score at
+            all on a sparse feasible set; see the module docstring. Passing
             ``False`` restores the unrepaired relaxation, which is the control
             arm for "what a method that ignores the constraint does" and is
             expected to score minus infinity everywhere the constraint bites.
@@ -503,7 +713,9 @@ class CMAES(Sampler):
             place as the check on ``repair`` rather than as a remedy in its own
             right: rejection at the feasible densities this package benchmarks
             at is not expensive but impossible, and with ``repair`` on nothing
-            is ever rejected.
+            is ever rejected. Constructibility is the test, not endpoint
+            feasibility -- rejecting on the weaker condition would let this
+            path keep the designs ``repair`` exists to exclude.
         max_attempts: Resampling rounds before giving up when ``feasible_only``.
         seed: Seeds the Gaussian.
 
@@ -516,7 +728,7 @@ class CMAES(Sampler):
         env: MutationEnvironment,
         *,
         initial_sigma: float = 1.0,
-        repair: bool = True,
+        repair: RepairPolicy = "greedy",
         feasible_only: bool = False,
         max_attempts: int = 50,
         seed: int = 0,
@@ -526,9 +738,18 @@ class CMAES(Sampler):
         if initial_sigma <= 0.0:
             raise ValueError(f"initial_sigma must be positive, got {initial_sigma}")
 
+        if repair not in _REPAIR_POLICIES:
+            raise ValueError(
+                f"repair must be one of {sorted(_REPAIR_POLICIES)}, got {repair!r}; "
+                f"the decoder decides how much of this arm's result is its own"
+            )
         self._env = env
         self._repair = repair
-        self._permitted = _permitted_adjacencies(env) if repair else None
+        self._permitted = _permitted_adjacencies(env) if repair == "exact" else None
+        # Which of the two search spaces the projection targets. Read from the
+        # environment rather than assumed, because the two differ by exactly the
+        # designs this arm used to be able to reach and the others could not.
+        self._ordered = env.constrains_intermediates
         self._feasible_only = feasible_only
         self._max_attempts = max_attempts
         self._rng = np.random.default_rng(seed)
@@ -566,8 +787,8 @@ class CMAES(Sampler):
     def name(self) -> str:
         """Short label, marking any deviation from the default configuration."""
         label = "CMAES"
-        if not self._repair:
-            label += " (unrepaired)"
+        if self._repair != "greedy":
+            label += f" ({self._repair} repair)" if self._repair != "none" else " (unrepaired)"
         if self._feasible_only:
             label += " (feasible)"
         return label
@@ -581,13 +802,15 @@ class CMAES(Sampler):
     def repaired_fraction(self) -> float:
         """Share of decoded designs the raw per-position argmax got wrong.
 
-        Measured as the fraction of emissions whose unprojected argmax was not
-        constructible, so it is a statement about the *relaxation* rather than
-        about the projection: at 0.0 the Gaussian is finding the feasible set on
-        its own and the projection is a formality, at 1.0 the Gaussian has never
-        once produced a buildable design and every design credited to this arm
-        is the projection's work. Reporting a CMA-ES result on a constrained
-        landscape without this number beside it overstates the method.
+        Measured as the fraction of emissions whose unprojected argmax the
+        environment could not construct -- inside the budget, feasible where it
+        stands, *and* reachable by some ordering of its substitutions -- so it is
+        a statement about the *relaxation* rather than about the projection: at
+        0.0 the Gaussian is finding the constructible set on its own and the
+        projection is a formality, at 1.0 the Gaussian has never once produced a
+        buildable design and every design credited to this arm is the
+        projection's work. Reporting a CMA-ES result on a constrained landscape
+        without this number beside it overstates the method.
 
         Returns:
             A fraction in ``[0, 1]``, and ``0.0`` before anything is decoded or
@@ -714,11 +937,11 @@ class CMAES(Sampler):
         for _ in range(self._max_attempts):
             sequences, draws = self._sample(n)
             self._count(n)
-            reachable = self._env.is_reachable(sequences)
-            if reachable.any():
-                kept_sequences.append(sequences[reachable])
-                kept_draws.append(draws[reachable])
-                found += int(reachable.sum())
+            constructible = self._env.is_constructible(sequences)
+            if constructible.any():
+                kept_sequences.append(sequences[constructible])
+                kept_draws.append(draws[constructible])
+                found += int(constructible.sum())
             if found >= n:
                 chosen = np.concatenate(kept_sequences)[:n]
                 self._remember(chosen, np.concatenate(kept_draws)[:n])
@@ -826,10 +1049,19 @@ class CMAES(Sampler):
         Two projections, and which are needed depends on the environment. The
         mutation budget always applies and factorises across positions, so the
         cheap independent argmax followed by reverting the least-confident
-        surplus substitutions is already its exact maximiser. An adjacency rule
-        does not factorise, and where one is set the whole decode is handed to
-        ``_project_onto_constructible`` instead, which solves both constraints
+        surplus substitutions is already its exact maximiser. Neither the
+        adjacency rule nor the ordering condition factorises, and where the
+        environment sets one the whole decode is handed to
+        ``_project_onto_constructible`` instead, which solves every constraint
         jointly and exactly.
+
+        Which rows go to the dynamic program is decided by
+        [is_constructible][evogfn.env.mutation.MutationEnvironment.is_constructible]
+        and not by
+        [is_reachable][evogfn.env.mutation.MutationEnvironment.is_reachable]. The
+        weaker test would wave through exactly the designs that are feasible
+        where they stand and that no trajectory can build, so the projection
+        would never see the rows it exists to repair.
 
         The unprojected argmax is decoded either way, and counted where it was
         not constructible. That costs one extra ``argmax`` and buys
@@ -851,7 +1083,18 @@ class CMAES(Sampler):
         budget = self._env.max_mutations
         decoded = _budgeted_argmax(logits, parent, length, budget)
         self._decoded += int(decoded.shape[0])
-        if self._permitted is None:
+        if self._repair == "none":
+            return decoded
+
+        # Counted before either repair runs, and against the same test both
+        # repairs have to satisfy, so the share is comparable between the two
+        # decoders and says the same thing about the relaxation under each.
+        unbuildable = ~self._env.is_constructible(decoded)
+        self._unbuildable += int(unbuildable.sum())
+        if not unbuildable.any():
+            return decoded
+        if self._repair == "greedy":
+            decoded[unbuildable] = _greedy_repair(logits[unbuildable], parent, self._env, budget)
             return decoded
 
         # A row whose unconstrained argmax is already constructible needs no
@@ -859,12 +1102,10 @@ class CMAES(Sampler):
         # logits over the whole ball, so it maximises them over the feasible
         # part of the ball too. Only the rest are handed to the dynamic program,
         # which is what keeps a loosely constrained landscape cheap.
-        unbuildable = ~self._env.is_reachable(decoded)
-        self._unbuildable += int(unbuildable.sum())
-        if unbuildable.any():
-            decoded[unbuildable] = _project_onto_constructible(
-                logits[unbuildable], parent, self._permitted, budget
-            )
+        assert self._permitted is not None  # noqa: S101 - built for this policy
+        decoded[unbuildable] = _project_onto_constructible(
+            logits[unbuildable], parent, self._permitted, budget, ordered=self._ordered
+        )
         return decoded
 
     def _remember(self, sequences: Tokens, draws: npt.NDArray[np.float64]) -> None:

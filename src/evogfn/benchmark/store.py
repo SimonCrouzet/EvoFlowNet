@@ -110,6 +110,7 @@ re-run has ever confirmed.
 from __future__ import annotations
 
 import ast
+import fcntl
 import hashlib
 import json
 from dataclasses import asdict, dataclass, field, replace
@@ -355,6 +356,72 @@ class RunRecord:
         bred_designs: Designs a genetic teacher produced and the policy was
             asked to construct a path to. Zero for every method that breeds
             nothing, which is every method except Genetic-GFN.
+        draws_attempted: Offspring a rejection-sampling arm drew before
+            filtering, summed over every attempt of every round. Zero for an arm
+            that does not reject its own output, which is most of them -- so it
+            is read beside the arm's name, like ``bred_designs``.
+        draws_rejected: How many of those the environment refused. The rejection
+            rate this and ``draws_attempted`` give is the cost the feasibility
+            claim is about: a masked policy pays none of it.
+        draws_unmutated: How many of the *admitted* draws were the anchor itself,
+            unchanged. Load-bearing, and not a curiosity: the mutation kernel
+            runs at ``p_m = 1/L``, so the per-offspring mutation count is
+            Poisson(1) and roughly a third of every batch carries no
+            substitution at all. Those draws are trivially reachable, so they
+            pass the filter and hold the rejection rate down to something that
+            reads survivable, while the arm makes no progress. Without this
+            column the rejection rate is the only evidence and it says the
+            wrong thing.
+        fitted: For an arm that trains a model on its own measurements, whether
+            that model had **actually been fitted** by the time the campaign
+            ended. ``None`` for an arm that fits nothing, which is most of them:
+            a genetic algorithm has no model whose state this could describe, and
+            a share of nothing is not ``False``.
+
+            Tri-valued for the same reason ``repaired_fraction`` is read beside
+            the arm's name: ``None`` means the quantity was never measured -- the
+            sampler carries no such notion, or the record predates this field --
+            while ``False`` is a measurement, and the one that matters. It says a
+            supervised arm ran its whole campaign in its random-screening stage
+            and never handed over to the model it is named for.
+
+            That is not a hypothetical.
+            [MLDE.observe][evogfn.algorithms.baselines.mlde.MLDE.observe] drops
+            an infeasible assay, having no fitness to regress on, so on a
+            landscape with a transition constraint the screening plates yield far
+            fewer training examples than they cost -- six usable from twenty-four
+            on a constrained toy. Where the infeasible share is large the
+            handover never happens, and the row is a **random baseline reported
+            under a supervised method's name**. Nothing else stored says so: the
+            oracle calls, the plate count, the proposals and the regret are all
+            exactly what a fitted campaign would have written.
+
+            Defaulted to ``None`` so that every record written before this field
+            existed loads as what it is -- a campaign whose fit nobody recorded
+            -- rather than as one that demonstrably never fitted. A default of
+            ``False`` would retroactively accuse every stored campaign of the
+            failure this field exists to detect.
+        exhausted: Whether the campaign that produced this record **failed to
+            finish**: its sampler could not propose designs the campaign had not
+            already measured, so the run raised rather than filling its plate.
+
+            Defaulted to ``False`` so that every record written before this
+            field existed loads as what it was, a completed campaign.
+
+            A record carrying ``True`` is the *evidence of a failure* rather than
+            a result, and the two must never be averaged together. Its ``best``,
+            ``diversity`` and ``feasible_fraction`` are ``nan`` and its ``regret``
+            is ``None`` -- never zero, which would read as a campaign that
+            measured nothing good rather than one that never measured. Its
+            ``rounds``, ``oracle_calls`` and ``proposals`` describe the part of
+            the campaign that *did* run, so the record says how far it got.
+
+            The alternative, and what this replaces, was storing nothing at all:
+            the arm then simply vanished from the store, and an empty cell in a
+            table is an absence that any reader may fill in as they please --
+            including as the sharpest result on it. An absence is also not
+            reproducible, since a re-run produces the same absence for a reason
+            nothing recorded.
         cpu_seconds: Processor time this campaign burned, from
             `time.process_time`. **This is the comparable cost figure.** A
             results table that shows an equal oracle budget and says nothing
@@ -392,6 +459,16 @@ class RunRecord:
             ``bred_designs``: a
             share of nothing is zero, and so is a run that bred thousands and
             could construct them all.
+        repaired_fraction: For an arm that decodes a continuous relaxation, the
+            share of its designs whose raw decode the environment could not
+            construct and which therefore reached the plate only through a
+            repair. This is an *attribution* field rather than a performance
+            one: at 0.0 the search distribution is finding the constructible set
+            unaided and the repair is a formality, at 1.0 every design credited
+            to the method was chosen by the repair subject to the method's
+            preferences, and the two cases warrant different sentences about
+            whose result it is. Zero for every arm that decodes nothing, which is
+            most of them -- so it is read beside the arm's name, not alone.
         parameters: The arm's resolved configuration -- what the methodology
             closed over, one scalar per setting. Provenance only: nothing
             compares it, and no value of it can make a record stale.
@@ -447,7 +524,16 @@ class RunRecord:
     # -- and raising would be read as a corrupt line and silently drop the
     # campaign.
     bred_designs: int = 0
+    draws_attempted: int = 0
+    draws_rejected: int = 0
+    draws_unmutated: int = 0
+    # `bool | None` and not `bool`: the three states are "fitted", "never
+    # fitted" and "nobody measured", and collapsing the last two is what let an
+    # arm that never fitted read as a tuned supervised baseline that lost.
+    fitted: bool | None = None
+    exhausted: bool = False
     unconstructible_fraction: float = 0.0
+    repaired_fraction: float = 0.0
     cpu_seconds: float = 0.0
     wall_seconds: float = 0.0
     duplicate_fraction: float = 0.0
@@ -632,13 +718,33 @@ class ResultStore:
         Appending per campaign rather than per run is what makes an interrupted
         suite keep everything it had finished.
 
+        The append is taken under an exclusive lock because a record is far
+        larger than the size at which the kernel makes an append atomic -- these
+        run to several kilobytes, against a limit of four -- so two processes
+        writing the same arm can interleave mid-record and leave a line that
+        parses as nothing. That failure is silent in both directions:
+        [load][evogfn.benchmark.store.ResultStore.load] skips what it cannot
+        parse, so the campaign disappears rather than being reported as damaged,
+        and the seed simply looks unrun.
+
+        Sharding a suite by task or by arm gives one writer per file and needs no
+        lock at all. Sharding by *seed* does not, and it is the natural way to
+        fill a machine when a tier has fewer tasks than cores -- so the lock is
+        here rather than in a rule about how to shard, which is a rule that
+        would be broken by whoever next needed the cores.
+
         Args:
             record: The result to store.
         """
         path = self._path(record.task, record.method)
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a") as handle:
-            handle.write(json.dumps(asdict(record)) + "\n")
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                handle.write(json.dumps(asdict(record)) + "\n")
+                handle.flush()
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
     def dependencies(self, depends_on: Sequence[str]) -> dict[str, str]:
         """Fingerprint of the closure of some entry points.
